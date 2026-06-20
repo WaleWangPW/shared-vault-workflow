@@ -16,6 +16,17 @@ shared-vault-workflow/
     └── redaction.md
 ```
 
+推荐再加上：
+
+```text
+├── AGENT_PROMPT_zh.md
+├── START_HERE.md
+├── QUICKSTART.md
+├── references/logs-safety.md
+├── references/resources-checklist.md
+└── scripts/check-secrets.sh
+```
+
 如果需要补一个仓库首页说明，可以额外加一个极简 `README.md`，但不要放个人资料。
 
 ## 不要发
@@ -45,11 +56,18 @@ shared-vault-workflow/
 ```text
 shared-vault-workflow/
 ├── SKILL.md
+├── AGENT_PROMPT_zh.md
+├── START_HERE.md
+├── QUICKSTART.md
 ├── references/
 │   ├── folder-map.md
 │   ├── maintenance.md
 │   ├── onboarding-zh.md
-│   └── redaction.md
+│   ├── redaction.md
+│   ├── logs-safety.md
+│   └── resources-checklist.md
+└── scripts/
+    └── check-secrets.sh
 └── README.md   # 可选，且必须是脱敏版
 ```
 
@@ -65,4 +83,3 @@ shared-vault-workflow/
 - 文件里没有可识别你个人环境的细节
 
 如果有一项不能确认，就不要发。
-

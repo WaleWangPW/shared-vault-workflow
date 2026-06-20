@@ -5,6 +5,8 @@ If you are human, read:
 1. `START_HERE.md`
 2. `references/onboarding-zh.md`
 3. `references/redaction.md`
+4. `references/logs-safety.md`
+5. `references/resources-checklist.md`
 
 If you are an AI agent, read:
 
@@ -21,3 +23,4 @@ Then use these rules:
 - `logs/` = dated activity
 - `Resources/` = templates and references
 
+Before sharing the repo, run `scripts/check-secrets.sh`.

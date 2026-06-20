@@ -11,6 +11,8 @@ This repo is a portable starter kit for Obsidian-based AI workspaces. It shows h
 - A safe redaction checklist for sharing with other people
 - A Chinese onboarding page for non-technical users
 - A direct agent bootstrap prompt for systems that do not support skills
+- A logs safety guide and a resources publishing checklist
+- A lightweight secret scan script for pre-share review
 
 ## Who it is for
 
@@ -35,7 +37,10 @@ This repo is a portable starter kit for Obsidian-based AI workspaces. It shows h
 - `references/maintenance.md`: what goes where and in what order
 - `references/onboarding-zh.md`: Chinese onboarding guide
 - `references/redaction.md`: how to remove secrets before sharing
+- `references/logs-safety.md`: what is safe to write into logs
+- `references/resources-checklist.md`: how to decide what belongs in Resources
 - `references/export-package-zh.md`: what to publish and what to keep private
+- `scripts/check-secrets.sh`: quick scan for obvious secret patterns
 
 ## The core idea
 
@@ -65,6 +70,8 @@ Do not publish:
 - private absolute paths
 - private workspace contents
 
+If you want a more polished rollout, share this repo together with `START_HERE.md` and `AGENT_PROMPT_zh.md` so the recipient gets both the human summary and the agent bootstrap prompt.
+
 ## If you want to share this repo
 
 Send the repo link together with:
@@ -73,4 +80,3 @@ Send the repo link together with:
 - [AGENT_PROMPT_zh.md](AGENT_PROMPT_zh.md)
 
 That is enough for a person or agent to understand the workflow without knowing anything about your private environment.
-

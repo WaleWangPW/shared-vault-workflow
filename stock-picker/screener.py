@@ -1,0 +1,111 @@
+# -*- coding: utf-8 -*-
+"""
+选股引擎 —— 基础筛选 + 隐形股票加分排序。
+纯逻辑（score_stock / passes_basic）可离线单元测试。
+仅供研究，非投资建议。
+"""
+from __future__ import annotations
+from typing import Optional, Dict, List
+from config import SCREEN, SCORE_WEIGHTS, PENALTY
+from data_source import Quote, Financials
+
+
+def passes_basic(q: Quote, f: Financials) -> Dict:
+    """
+    第一层硬性筛选。返回 {"pass": bool, "reasons": [...], "skipped": [...]}。
+    无财务数据（AKShare-only）时，相关条件计入 skipped 而非判负。
+    """
+    reasons, skipped = [], []
+    ok = True
+
+    if q.market_cap:
+        if not (SCREEN["market_cap_min"] <= q.market_cap <= SCREEN["market_cap_max"]):
+            ok = False
+            reasons.append(f"市值 {q.market_cap/1e8:.0f}亿 不在区间")
+    else:
+        skipped.append("市值")
+
+    if q.amount:
+        if q.amount < SCREEN["daily_amount_min"]:
+            ok = False
+            reasons.append("成交额不足")
+    else:
+        skipped.append("成交额")
+
+    if f.revenue_growth_yoy is not None:
+        if f.revenue_growth_yoy < SCREEN["revenue_growth_yoy_min"]:
+            ok = False
+            reasons.append("营收增速不足")
+    else:
+        skipped.append("营收增速")
+
+    if f.profit_growth_yoy is not None:
+        if f.profit_growth_yoy < SCREEN["profit_growth_yoy_min"]:
+            ok = False
+            reasons.append("净利增速不足")
+    else:
+        skipped.append("净利增速")
+
+    if SCREEN["operating_cashflow_positive"] and f.operating_cashflow is not None:
+        if f.operating_cashflow <= 0:
+            ok = False
+            reasons.append("经营现金流为负")
+    elif f.operating_cashflow is None:
+        skipped.append("经营现金流")
+
+    return {"pass": ok, "reasons": reasons, "skipped": skipped}
+
+
+def score_stock(q: Quote, f: Financials, flags: Optional[Dict] = None) -> Dict:
+    """
+    第二层加分。flags 含 pe_percentile / price_1y_pct / 外部信号。
+    AKShare-only 模式下多为 None，不加分也不扣分。
+    """
+    flags = flags or {}
+    score = 0
+    hits: List[str] = []
+    w = SCORE_WEIGHTS
+
+    if (q.ps_ttm is not None and q.ps_ttm < 5
+            and f.revenue_growth_yoy is not None and f.revenue_growth_yoy > 1.0):
+        score += w["ps_lt5_rev_gt100"]; hits.append("PS<5且营收>100%")
+
+    if f.rd_ratio is not None and f.rd_ratio > 0.15:
+        score += w["rd_ratio_gt15"]; hits.append("研发>15%")
+
+    gm = f.gross_margin_series
+    if len(gm) >= 3 and gm[-1] > gm[-2] > gm[-3]:
+        score += w["gross_margin_3q_up"]; hits.append("毛利率连升3季")
+
+    if flags.get("ocf_improving"):
+        score += w["ocf_improving"]; hits.append("现金流改善")
+    if flags.get("new_institution_survey"):
+        score += w["new_institution_survey"]; hits.append("新增机构调研")
+    if flags.get("insider_buying"):
+        score += w["insider_buying"]; hits.append("高管增持")
+    if flags.get("analyst_coverage_0to1"):
+        score += w["analyst_coverage_0to1"]; hits.append("分析师0→1")
+    if flags.get("industry_uptrend"):
+        score += w["industry_uptrend"]; hits.append("行业景气上升")
+
+    # ── 降权护栏（澜起教训：过度定价 → 扣分）──────────────────────────
+    pe_pct = flags.get("pe_percentile")   # 0~1
+    if pe_pct is not None:
+        if pe_pct > 0.90:
+            score += PENALTY["pe_percentile_gt80"] + PENALTY["pe_percentile_gt90"]
+            hits.append("⚠PE>90%分位")
+        elif pe_pct > 0.80:
+            score += PENALTY["pe_percentile_gt80"]
+            hits.append("⚠PE>80%分位")
+
+    p1y = flags.get("price_1y_pct")       # 3.0 = +300%
+    if p1y is not None and p1y > 3.0:
+        score += PENALTY["price_1y_gt300pct"]
+        hits.append("⚠一年涨>300%")
+
+    return {"score": score, "hits": hits}
+
+
+def rank(candidates: List[Dict], top_n: int = 15) -> List[Dict]:
+    """candidates: [{quote, financials, score, ...}]，按 score 降序取 top_n。"""
+    return sorted(candidates, key=lambda c: c.get("score", 0), reverse=True)[:top_n]

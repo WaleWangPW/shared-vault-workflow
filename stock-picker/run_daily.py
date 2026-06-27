@@ -19,7 +19,7 @@ from config import WATCHLIST, MAX_HOLDINGS, HOLDINGS, MARKET_DEPTH
 from data_source import get_source
 from screener import passes_basic, score_stock, rank
 from buy_point import calculate_buy_point
-from push import build_daily_text, send_feishu
+from push import build_daily_text, send_feishu, push_to_notion, save_obsidian_daily
 
 
 def run(dry_run: bool = False):
@@ -97,8 +97,16 @@ def run(dry_run: bool = False):
 
     if dry_run:
         print("[run_daily] --dry-run，未推送")
-    else:
-        print("[run_daily] 推送结果:", send_feishu(text))
+        return
+
+    # ── 多渠道推送 ─────────────────────────────────────────────────────
+    print("[run_daily] 飞书:", send_feishu(text))
+
+    notion_result = push_to_notion(top, today)
+    print(f"[run_daily] Notion: {notion_result}")
+
+    obs_path = save_obsidian_daily(today, top, holdings_view)
+    print(f"[run_daily] Obsidian md: {obs_path}")
 
 
 if __name__ == "__main__":

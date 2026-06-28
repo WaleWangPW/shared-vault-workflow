@@ -39,14 +39,20 @@ else:
 
 # ── 2. 依赖库 ────────────────────────────────────────────────
 print("\n[2] 依赖库")
-deps = {"akshare": "akshare", "pandas": "pandas", "tushare": "tushare"}
-for name, mod in deps.items():
+deps = {
+    "akshare":   ("akshare",    True),   # (模块名, 是否必须)
+    "pandas":    ("pandas",     True),
+    "tushare":   ("tushare",    False),
+    "lark-oapi": ("lark_oapi",  False),  # 飞书双向交互层需要
+}
+for pkg, (mod, required) in deps.items():
     try:
         __import__(mod)
-        print(f"  ✓ {name}")
+        print(f"  ✓ {pkg}")
     except ImportError:
-        print(f"  ✗ {name} 未安装（pip install {name}）")
-        if name == "akshare":
+        tag = "必须" if required else "可选"
+        print(f"  {'✗' if required else '○'} {pkg} 未安装（{tag}）  pip install {pkg}")
+        if required:
             ok = False
 
 # ── 3. 数据源连通性 ──────────────────────────────────────────

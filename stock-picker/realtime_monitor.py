@@ -18,10 +18,11 @@ import sys
 import time
 import datetime as dt
 from typing import Dict, List, Optional, Set
-from config import WATCHLIST, HOLDINGS, MARKET_DEPTH, BUY_POINT
+from config import WATCHLIST, MARKET_DEPTH, BUY_POINT
 from data_source import get_source
 from buy_point import calculate_buy_point
 from push import send_feishu
+from holdings_store import load_holdings, effective_watchlist
 
 DEFAULT_INTERVAL = 300       # 5 分钟
 VOLUME_SPIKE_RATIO = 2.0     # 成交量放大阈值
@@ -51,7 +52,7 @@ def is_trading_hours() -> bool:
 
 def check_watchlist_alerts(src) -> List[str]:
     alerts: List[str] = []
-    for item in WATCHLIST:
+    for item in effective_watchlist(WATCHLIST):
         if item["market"] == "PRIMARY" or not item["code"]:
             continue
         code, market, name = item["code"], item["market"], item["name"]
@@ -99,23 +100,18 @@ def check_watchlist_alerts(src) -> List[str]:
 
 
 def check_holding_alerts(src) -> List[str]:
-    """对 config.HOLDINGS 中的持仓做止损检查。"""
+    """对 holdings.json 中的持仓做止损检查。"""
     alerts: List[str] = []
     stop_threshold = BUY_POINT["stop_loss_ratio"] - 1.0   # e.g. 0.85 - 1 = -0.15
 
-    for code, pos in HOLDINGS.items():
+    for code, pos in load_holdings().items():
         cost = pos.get("cost", 0)
         if not cost:
             continue
-        # 在 WATCHLIST 里找市场信息
-        market = next(
-            (item["market"] for item in WATCHLIST if item["code"] == code),
-            "A"
-        )
-        name = next(
-            (item["name"] for item in WATCHLIST if item["code"] == code),
-            code
-        )
+        # 先从 holdings.json 取名称，再从有效关注列表补充市场信息
+        name = pos.get("name", code)
+        wl = effective_watchlist(WATCHLIST)
+        market = next((item["market"] for item in wl if item["code"] == code), "A")
         try:
             q = src.get_quote(code, market)
             if q is None or q.price <= 0:

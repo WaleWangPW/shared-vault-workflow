@@ -15,11 +15,12 @@
 from __future__ import annotations
 import sys
 import datetime as dt
-from config import WATCHLIST, MAX_HOLDINGS, HOLDINGS, MARKET_DEPTH
+from config import WATCHLIST, MAX_HOLDINGS, MARKET_DEPTH
 from data_source import get_source
 from screener import passes_basic, score_stock, rank
 from buy_point import calculate_buy_point
 from push import build_daily_text, send_feishu
+from holdings_store import load_holdings, effective_watchlist
 
 
 def run(dry_run: bool = False):
@@ -27,8 +28,11 @@ def run(dry_run: bool = False):
     print(f"[run_daily] 数据源: {src.name}")
     today = dt.date.today().strftime("%Y-%m-%d")
 
+    watchlist = effective_watchlist(WATCHLIST)
+    holdings  = load_holdings()
+
     candidates = []
-    for item in WATCHLIST:
+    for item in watchlist:
         if item["market"] == "PRIMARY" or not item["code"]:
             continue
         code, market = item["code"], item["market"]
@@ -89,9 +93,9 @@ def run(dry_run: bool = False):
     top = rank(candidates, MAX_HOLDINGS)
 
     holdings_view = []
-    for hcode, pos in HOLDINGS.items():
+    for hcode, pos in holdings.items():
         cost = pos.get("cost")
-        wl_item = next((w for w in WATCHLIST if w["code"] == hcode), {})
+        wl_item = next((w for w in watchlist if w["code"] == hcode), {})
         hmarket = wl_item.get("market", "A")
         hname   = wl_item.get("name", hcode)
         hprice  = None

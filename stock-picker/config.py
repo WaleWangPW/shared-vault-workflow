@@ -78,7 +78,12 @@ HOLDINGS = {}
 # ---------------- 推送 ----------------
 PUSH = {
     "daily_time": "08:30",
+    # 方式一：飞书自定义机器人 webhook（优先）
     "feishu_webhook_env": "FEISHU_WEBHOOK_URL",
+    # 方式二：飞书应用 API（app_id + app_secret + chat_id）
+    "feishu_app_id_env":     "FEISHU_APP_ID",
+    "feishu_app_secret_env": "FEISHU_APP_SECRET",
+    "feishu_chat_id_env":    "FEISHU_CHAT_ID",
 }
 
 # ---------------- 数据源 ----------------

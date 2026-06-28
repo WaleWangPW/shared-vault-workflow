@@ -6,9 +6,9 @@
 """
 import os, sys
 
-REQUIRED_ENVS  = []                        # 无硬性必须（AKShare 模式无需 token）
-OPTIONAL_ENVS  = ["TUSHARE_TOKEN", "FEISHU_WEBHOOK_URL"]
-TEST_CODE      = "688008"                  # 澜起科技，用于连通性测试
+OPTIONAL_ENVS  = ["TUSHARE_TOKEN", "FEISHU_WEBHOOK_URL",
+                  "FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"]
+TEST_CODE      = "688008"
 TEST_MARKET    = "A"
 
 ok = True
@@ -25,11 +25,17 @@ for key in OPTIONAL_ENVS:
         masked = val[:4] + "****" + val[-2:] if len(val) > 6 else "****"
         print(f"  ✓ {key} = {masked}")
     else:
-        print(f"  ○ {key} 未设置（可选）")
+        print(f"  ○ {key} 未设置")
 
-feishu_set = bool(os.environ.get("FEISHU_WEBHOOK_URL", "").strip())
+webhook_set = bool(os.environ.get("FEISHU_WEBHOOK_URL", "").strip())
+app_set = all(os.environ.get(k, "").strip()
+              for k in ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_CHAT_ID"))
+feishu_set = webhook_set or app_set
 if not feishu_set:
-    print("  ⚠  FEISHU_WEBHOOK_URL 未设置 → 推送功能不可用，--dry-run 模式可正常运行")
+    print("  ⚠  飞书推送未配置 → --dry-run 模式可正常运行")
+else:
+    mode = "webhook" if webhook_set else "app API"
+    print(f"  ✓ 飞书推送模式: {mode}")
 
 # ── 2. 依赖库 ────────────────────────────────────────────────
 print("\n[2] 依赖库")
@@ -66,7 +72,7 @@ if feishu_set:
         from push import send_feishu
         r = send_feishu("[check_env] 飞书推送测试 ✓（忽略此消息）")
         if r.get("sent"):
-            print(f"  ✓ 推送成功: {r.get('resp','')[:80]}")
+            print(f"  ✓ 推送成功")
         else:
             print(f"  ✗ 推送失败: {r.get('reason')}")
             ok = False
@@ -74,7 +80,7 @@ if feishu_set:
         print(f"  ✗ 推送异常: {e}")
         ok = False
 else:
-    print("  ○ 跳过（未配置 FEISHU_WEBHOOK_URL）")
+    print("  ○ 跳过（未配置飞书推送）")
 
 # ── 结果 ─────────────────────────────────────────────────────
 print("\n" + "=" * 50)

@@ -71,11 +71,21 @@ class AKShareSource(DataSource):
     def __init__(self):
         import akshare as ak
         self.ak = ak
+        self._spot_df: Optional[pd.DataFrame] = None
+        self._spot_date: str = ""
 
     def _date_range(self, days: int):
         end = dt.date.today().strftime("%Y%m%d")
         start = (dt.date.today() - dt.timedelta(days=int(days * 1.6))).strftime("%Y%m%d")
         return start, end
+
+    def _spot_cache(self) -> pd.DataFrame:
+        """东方财富全量 A 股实时行情（同一天内复用，避免重复下载）。"""
+        today = dt.date.today().isoformat()
+        if self._spot_df is None or self._spot_date != today:
+            self._spot_df = self.ak.stock_zh_a_spot_em()
+            self._spot_date = today
+        return self._spot_df
 
     def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
         ak = self.ak
@@ -98,39 +108,32 @@ class AKShareSource(DataSource):
         ak = self.ak
         try:
             if market == "A":
-                info = ak.stock_individual_info_em(symbol=code)
-                d = dict(zip(info["item"], info["value"]))
-
                 start, end = self._date_range(5)
                 hist = ak.stock_zh_a_hist(symbol=code, period="daily",
                                           start_date=start, end_date=end, adjust="qfq")
-                price = float(hist["收盘"].iloc[-1])
+                price  = float(hist["收盘"].iloc[-1])
                 amount = float(hist["成交额"].iloc[-1]) if "成交额" in hist.columns else 0.0
                 pct_chg = float(hist["涨跌幅"].iloc[-1]) if "涨跌幅" in hist.columns else 0.0
 
-                def _parse_rmb(s) -> float:
-                    s = str(s or "").strip()
-                    try:
-                        if "亿" in s:
-                            return float(s.replace("亿", "")) * 1e8
-                        if "万" in s:
-                            return float(s.replace("万", "")) * 1e4
-                        return float(s)
-                    except Exception:
-                        return 0.0
-
-                market_cap = _parse_rmb(d.get("总市值", "0"))
-
-                pe_ttm = None
+                # 市值 / PE / 名称 —— 从全量实时行情缓存中取
+                market_cap, pe_ttm, name = 0.0, None, ""
                 try:
-                    raw = str(d.get("市盈率TTM", "") or "").replace("-", "").strip()
-                    if raw:
-                        v = float(raw)
-                        pe_ttm = v if v > 0 else None
+                    spot = self._spot_cache()
+                    row = spot[spot["代码"] == code]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        name = str(r.get("名称", ""))
+                        mc = r.get("总市值")
+                        if mc is not None:
+                            market_cap = float(mc)  # 单位：元
+                        pe_raw = r.get("市盈率-动态")
+                        if pe_raw is not None and str(pe_raw) not in ("-", "nan", "None", ""):
+                            v = float(pe_raw)
+                            pe_ttm = v if v > 0 else None
                 except Exception:
                     pass
 
-                return Quote(code=code, name=str(d.get("股票简称", "")),
+                return Quote(code=code, name=name,
                              price=price, pct_change=pct_chg,
                              amount=amount, market_cap=market_cap, pe_ttm=pe_ttm)
             else:
@@ -145,29 +148,9 @@ class AKShareSource(DataSource):
         return Financials(code=code)
 
     def get_pe_percentile(self, code: str, market: str, years: int = 3) -> Optional[float]:
-        """用 AKShare 历史 PE 序列计算分位。仅 A 股支持，失败静默返回 None。"""
-        if market != "A":
-            return None
-        try:
-            df = self.ak.stock_a_lg_indicator(symbol=code)
-            if df is None or df.empty:
-                return None
-            pe_col = next((c for c in df.columns if "市盈率" in c), None)
-            if pe_col is None:
-                return None
-            df = df.copy()
-            df["日期"] = pd.to_datetime(df["日期"])
-            cutoff = pd.Timestamp(dt.date.today() - dt.timedelta(days=years * 365))
-            df = df[df["日期"] >= cutoff].sort_values("日期")
-            pe_series = pd.to_numeric(df[pe_col], errors="coerce").dropna()
-            pe_pos = pe_series[pe_series > 0].tolist()
-            if len(pe_pos) < 20:
-                return None
-            current_pe = pe_pos[-1]
-            pct = sum(1 for p in pe_pos if p <= current_pe) / len(pe_pos)
-            return round(pct, 3)
-        except Exception:
-            return None
+        # AKShare 模式不支持历史 PE 分位计算，静默返回 None。
+        # 需要 PE 历史分位请配置 TUSHARE_TOKEN。
+        return None
 
 
 # ---------------------------------------------------------------------------

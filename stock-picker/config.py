@@ -24,7 +24,7 @@ TARGET_SECTORS = ["科技", "半导体", "AI", "新能源", "生物医药", "软
 # ---------------- 第一层：基础筛选阈值 ----------------
 SCREEN = {
     "market_cap_min": 50e8,      # 50 亿
-    "market_cap_max": 2000e8,    # 2000 亿
+    "market_cap_max": 5000e8,    # 5000 亿
     "daily_amount_min": 5000e4,  # 日均成交额 5000 万
     "revenue_growth_yoy_min": 0.30,   # 营收同比 >30%
     "profit_growth_yoy_min": 0.50,    # 净利润同比 >50%

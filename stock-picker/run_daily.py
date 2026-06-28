@@ -90,7 +90,24 @@ def run(dry_run: bool = False):
 
     holdings_view = []
     for hcode, pos in HOLDINGS.items():
-        holdings_view.append({"code": hcode, "cost": pos.get("cost")})
+        cost = pos.get("cost")
+        wl_item = next((w for w in WATCHLIST if w["code"] == hcode), {})
+        hmarket = wl_item.get("market", "A")
+        hname   = wl_item.get("name", hcode)
+        hprice  = None
+        pnl_pct = None
+        try:
+            hq = src.get_quote(hcode, hmarket)
+            if hq and hq.price:
+                hprice = round(hq.price, 3)
+                if cost:
+                    pnl_pct = f"{(hq.price - cost) / cost * 100:+.1f}%"
+        except Exception:
+            pass
+        holdings_view.append({
+            "code": hcode, "name": hname,
+            "cost": cost, "price": hprice, "pnl_pct": pnl_pct,
+        })
 
     text = build_daily_text(today, top, holdings_view)
     print("\n" + text + "\n")

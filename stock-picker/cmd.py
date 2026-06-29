@@ -390,18 +390,30 @@ def cmd_guanzhu_list():
 # ── 选股 ───────────────────────────────────────────────────────────────────────
 
 def cmd_xuangu(args):
-    """全市场选股扫描，支持可选行业关键词。"""
+    """分市场选股扫描：A/HK/US/ALL，支持可选行业关键词（仅A股）。"""
     from market_screener import run_market_screen
-    sector_kw = args[0] if args else ""
+    MARKETS = {"A", "HK", "US", "ALL", "全部"}
+    market = "A"
+    sector_kw = ""
     top_n = 10
     deep_n = 40
-    for i, a in enumerate(args):
-        if a in ("-n", "--top") and i + 1 < len(args):
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.upper() in MARKETS:
+            market = "A" if a == "全部" else a.upper()
+            if a == "全部":
+                market = "ALL"
+        elif a in ("-n", "--top") and i + 1 < len(args):
             try:
                 top_n = int(args[i + 1])
+                i += 1
             except ValueError:
                 pass
-    return run_market_screen(sector_kw=sector_kw, top_n=top_n, deep_n=deep_n)
+        elif not a.startswith("-"):
+            sector_kw = a
+        i += 1
+    return run_market_screen(market=market, sector_kw=sector_kw, top_n=top_n, deep_n=deep_n)
 
 
 # ── 诊断 ───────────────────────────────────────────────────────────────────────
@@ -466,7 +478,7 @@ HELP = """📋 股票助手指令
   关注列表                          查看全部关注股
   查 <代码>                         查 688008
   日报                              立即触发选股日报
-  选股 [行业关键词]                 全市场A股扫描，如：选股 半导体
+  选股 [A|HK|US|ALL] [行业]        选股 HK / 选股 US / 选股 A 半导体
   诊断                              验证数据源和凭证配置
 
 HK代码支持 HK6082 或 06082 两种格式（自动转换）

@@ -21,21 +21,36 @@ WATCHLIST = [
 # ---------------- 题材池 ----------------
 TARGET_SECTORS = ["科技", "半导体", "AI", "新能源", "生物医药", "软件", "光模块", "先进封装"]
 
-# ---------------- 第一层：基础筛选阈值 ----------------
-SCREEN = {
-    "market_cap_min": 50e8,      # 50 亿
+# ---------------- 第一层：基础筛选阈值（A股）----------------
+SCREEN_A = {
+    "market_cap_min": 50e8,      # 50 亿人民币
     "market_cap_max": 5000e8,    # 5000 亿
-    "daily_amount_min": 5000e4,  # 日均成交额 5000 万
-    "revenue_growth_yoy_min": 0.30,   # 营收同比 >30%
-    "profit_growth_yoy_min": 0.35,    # 净利润同比 >35%（原50%过严，会漏高质量公司）
-    "forward_pe_max": 30,             # 预期 PE < 30
+    "daily_amount_min": 5000e4,  # 日均成交额 5000 万元
+    "revenue_growth_yoy_min": 0.30,
+    "profit_growth_yoy_min": 0.35,
+    "forward_pe_max": 30,
     "peg_max": 1.0,
     "ps_max": 10,
     "operating_cashflow_positive": True,
-    # ── 质量安全门（新增）──────────────────────────────
-    "exclude_st": True,               # 自动排除 ST / *ST 风险警示股
-    "ocf_ni_ratio_min": 0.5,          # OCF/净利润 < 0.5 → 排除（严重现金流造假信号）
-    "core_profit_ratio_min": 0.5,     # 扣非净利/净利 < 50% → 排除（严重依赖非经常性收益）
+    "exclude_st": True,
+    "ocf_ni_ratio_min": 0.5,
+    "core_profit_ratio_min": 0.5,
+}
+SCREEN = SCREEN_A   # 向后兼容（screener.py 直接 import SCREEN）
+
+# ---------------- 第一层：基础筛选阈值（港股）----------------
+SCREEN_HK = {
+    "market_cap_min": 20e8,      # 20 亿港元（约 18 亿人民币）
+    "market_cap_max": None,
+    "daily_amount_min": 1000e4,  # 1000 万港元日成交（港股流动性较弱）
+    "pe_ttm_max": 80,            # 剔除极高 PE
+}
+
+# ---------------- 第一层：基础筛选阈值（美股）----------------
+SCREEN_US = {
+    "market_cap_min": None,      # 用固定 Universe 控制范围，不做市值下限
+    "daily_amount_min": None,
+    "pe_ttm_max": 200,           # 成长股 PE 可较高，宽松过滤
 }
 
 # ---------------- 第二层：隐形股票加分权重 ----------------

@@ -261,7 +261,8 @@ def _handle_text(text: str, client, chat_id: str) -> Optional[str]:
 # ── WebSocket 事件处理 ────────────────────────────────────────────────────────
 
 def _make_handler(client):
-    def on_message(data) -> None:
+    from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
+    def on_message(data: P2ImMessageReceiveV1) -> None:
         try:
             msg = data.event.message
             # 只处理 text 类型消息
@@ -305,13 +306,11 @@ def main(once: bool = False):
         _reply(client, CHAT_ID, "🤖 股票助手已启动（测试 ping），发送「帮助」查看指令")
         return
 
-    from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
-
     ws_client = (lark.ws.Client(
         APP_ID, APP_SECRET,
         event_handler=(
             lark.EventDispatcherHandler.builder("", "")
-            .register(P2ImMessageReceiveV1, _make_handler(client))
+            .register_p2_im_message_receive_v1(_make_handler(client))
             .build()
         ),
         log_level=lark.LogLevel.WARNING,

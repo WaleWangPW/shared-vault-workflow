@@ -13,8 +13,33 @@
 仅供研究学习，不构成投资建议。
 """
 from __future__ import annotations
-import sys
+import sys, os
 import datetime as dt
+
+
+def _load_dotenv():
+    d = os.path.dirname(os.path.abspath(__file__))
+    p = os.path.join(d, ".env")
+    if not os.path.exists(p):
+        return
+    with open(p, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k and k not in os.environ:
+                os.environ[k] = v
+
+
+_load_dotenv()
+
 from config import WATCHLIST, MAX_HOLDINGS, MARKET_DEPTH
 from data_source import get_source
 from screener import passes_basic, score_stock, rank

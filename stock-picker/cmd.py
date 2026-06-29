@@ -26,6 +26,32 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
+
+def _load_dotenv():
+    """从脚本同目录的 .env 自动加载环境变量（支持有/无 export 前缀）。
+    已存在于 os.environ 的变量不覆盖，确保 shell 层面 export 的优先级更高。
+    """
+    env_path = os.path.join(_DIR, ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
+_load_dotenv()
+
 from holdings_store import (
     load_holdings, add_holding, remove_holding,
     add_to_watchlist, remove_from_watchlist,
@@ -135,6 +161,7 @@ def cmd_fenxi():
             market = next((w["market"] for w in wl if w["code"] == code), "A")
 
             q = bp = None
+            f_data = None
             prices = []
             try:
                 if src:
@@ -142,6 +169,8 @@ def cmd_fenxi():
                     q = src.get_quote(code, market)
                     if prices:
                         bp = calculate_buy_point(prices)
+                    if market == "A":
+                        f_data = src.get_financials(code, market)
             except Exception:
                 pass
 
@@ -150,6 +179,7 @@ def cmd_fenxi():
             pnl_pct   = (cur - cost) / cost * 100 if cur and cost else None
             mkt_val   = cur * shs if cur else None
 
+            pe_str    = f"  PE={q.pe_ttm:.1f}" if q and q.pe_ttm else ""
             pct_str   = f"  今日{pct:+.2f}%" if pct is not None else ""
             price_str = f"¥{cur:.3f}" if cur else "N/A"
             pnl_str   = f"{pnl_pct:+.1f}%" if pnl_pct is not None else "N/A"
@@ -159,8 +189,21 @@ def cmd_fenxi():
                 total_cost += cost * shs
                 total_val  += cur * shs
 
-            lines.append(f"\n{name}({code}/{market})  {price_str}{pct_str}")
+            lines.append(f"\n{name}({code}/{market})  {price_str}{pct_str}{pe_str}")
             lines.append(f"  成本¥{cost} × {shs}股  盈亏{pnl_str}  市值{val_str}")
+
+            # 基本面（A股 Tushare 模式下有数据）
+            if f_data:
+                fparts = []
+                if f_data.revenue_growth_yoy is not None:
+                    fparts.append(f"营收增速{f_data.revenue_growth_yoy*100:+.0f}%")
+                if f_data.profit_growth_yoy is not None:
+                    fparts.append(f"利润增速{f_data.profit_growth_yoy*100:+.0f}%")
+                if f_data.operating_cashflow is not None:
+                    cf = f_data.operating_cashflow / 1e8
+                    fparts.append(f"经营现金流{cf:+.1f}亿")
+                if fparts:
+                    lines.append(f"  基本面: {' | '.join(fparts)}")
 
             if bp and not bp.get("error"):
                 buy_pt   = bp.get("buy_point")
@@ -193,7 +236,8 @@ def cmd_fenxi():
                 if signals:
                     lines.append(f"  信号: {' | '.join(signals)}")
             else:
-                lines.append("  数据不足，无法计算买点")
+                err_msg = bp.get("error", "数据不足") if bp else "数据不足"
+                lines.append(f"  {err_msg}")
 
         if total_cost > 0:
             lines.append(f"\n持仓总盈亏: {(total_val-total_cost)/total_cost*100:+.1f}%  总市值¥{total_val:,.0f}")

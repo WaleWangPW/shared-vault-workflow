@@ -2,11 +2,14 @@
 """
 数据源抽象层。
 
-- AKShareSource：免费，行情 + 基础估值（底层爬东财/新浪）。无需 token。
-- TushareSource：付费 ¥1000/年，财报 + 估值 + 机构持仓。需 TUSHARE_TOKEN。
+- AKShareSource：免费，A 股行情 + 基础估值（东财/新浪）。无 token。
+- YFinanceSource：免费，HK/US 行情（Yahoo Finance，全球可用）。无 token。
+- TushareSource：付费 ¥1000/年，A 股财报 + 估值 + 机构持仓。需 TUSHARE_TOKEN。
+- HybridSource：A 股用 AKShare，HK/US 自动切换 yfinance（推荐）。
 
-未配置 token 时，get_source() 自动返回 AKShare-only 源（财务字段返回 None，
-screener 会据此跳过依赖财报的条件，仅做行情+技术面筛选）。
+get_source() 优先级：
+  有 TUSHARE_TOKEN → TushareSource（A股财务）+ YFinanceSource（HK/US）
+  无 token        → AKShareSource（A股）+ YFinanceSource（HK/US）
 """
 from __future__ import annotations
 import os
@@ -122,30 +125,39 @@ class AKShareSource(DataSource):
         ak = self.ak
         try:
             if market == "A":
-                start, end = self._date_range(5)
-                hist = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                          start_date=start, end_date=end, adjust="qfq")
-                price  = float(hist["收盘"].iloc[-1])
-                amount = float(hist["成交额"].iloc[-1]) if "成交额" in hist.columns else 0.0
-                pct_chg = float(hist["涨跌幅"].iloc[-1]) if "涨跌幅" in hist.columns else 0.0
-
-                # 市值 / PE / 名称 —— 从全量实时行情缓存中取
-                market_cap, pe_ttm, name = 0.0, None, ""
+                # 优先用东财实时行情快照（含最新价/涨跌幅/市值/PE，一次调用搞定）
+                name, price, pct_chg, amount, market_cap, pe_ttm = "", 0.0, 0.0, 0.0, 0.0, None
                 try:
                     spot = self._spot_cache()
                     row = spot[spot["代码"] == code]
                     if not row.empty:
                         r = row.iloc[0]
                         name = str(r.get("名称", ""))
+                        price = float(r.get("最新价") or 0)
+                        pct_raw = r.get("涨跌幅")
+                        if pct_raw is not None and str(pct_raw) not in ("-", "nan", "None", ""):
+                            pct_chg = float(pct_raw)
+                        amt = r.get("成交额")
+                        if amt is not None:
+                            amount = float(amt)
                         mc = r.get("总市值")
                         if mc is not None:
-                            market_cap = float(mc)  # 单位：元
+                            market_cap = float(mc)
                         pe_raw = r.get("市盈率-动态")
                         if pe_raw is not None and str(pe_raw) not in ("-", "nan", "None", ""):
                             v = float(pe_raw)
                             pe_ttm = v if v > 0 else None
                 except Exception:
                     pass
+
+                # 快照取价失败时，降级取历史收盘
+                if not price:
+                    start, end = self._date_range(5)
+                    hist = ak.stock_zh_a_hist(symbol=code, period="daily",
+                                              start_date=start, end_date=end, adjust="qfq")
+                    price   = float(hist["收盘"].iloc[-1])
+                    amount  = float(hist["成交额"].iloc[-1]) if "成交额" in hist.columns else 0.0
+                    pct_chg = float(hist["涨跌幅"].iloc[-1]) if "涨跌幅" in hist.columns else 0.0
 
                 return Quote(code=code, name=name,
                              price=price, pct_change=pct_chg,
@@ -409,16 +421,156 @@ class TushareSource(DataSource):
 
 
 # ---------------------------------------------------------------------------
+# YFinance 源（HK / US，全球可用）
+# ---------------------------------------------------------------------------
+
+class YFinanceSource(DataSource):
+    """Yahoo Finance：HK/US 行情，无需 token，全球可访问。"""
+    name = "yfinance"
+
+    def __init__(self):
+        import yfinance as yf
+        self._yf = yf
+        self._tickers: dict = {}                   # sym → yf.Ticker（同进程复用）
+        self._hist: dict = {}                       # sym → (datetime, DataFrame)
+
+    @staticmethod
+    def _symbol(code: str, market: str) -> str:
+        """把内部代码转成 yfinance ticker。"""
+        if market == "HK":
+            # Yahoo Finance 最少 4 位：09992 → 9992.HK，00241 → 0241.HK
+            return f"{int(code):04d}.HK"
+        if market == "A":
+            # 6/9 开头 → 上交所(.SS)，其余 → 深交所(.SZ)
+            return f"{code}.SS" if code[0] in ("6", "9") else f"{code}.SZ"
+        return code  # US 直接用 ticker
+
+    def _ticker(self, sym: str):
+        if sym not in self._tickers:
+            self._tickers[sym] = self._yf.Ticker(sym)
+        return self._tickers[sym]
+
+    def _fetch_hist(self, sym: str, days: int) -> pd.DataFrame:
+        """带 5 分钟 TTL 的历史数据缓存，避免同一进程重复 HTTP 请求。"""
+        cached = self._hist.get(sym)
+        if cached:
+            ts, df = cached
+            if (dt.datetime.now() - ts).total_seconds() < 300 and len(df) >= days:
+                return df
+        period_days = max(int(days * 1.6), 30)
+        try:
+            df = self._ticker(sym).history(period=f"{period_days}d")
+        except Exception as e:
+            print(f"[yfinance] history {sym}: {e}")
+            df = pd.DataFrame()
+        self._hist[sym] = (dt.datetime.now(), df)
+        return df
+
+    def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
+        sym = self._symbol(code, market)
+        df = self._fetch_hist(sym, days)
+        if df.empty:
+            return []
+        return df["Close"].astype(float).tolist()[-days:]
+
+    def get_quote(self, code: str, market: str) -> Optional[Quote]:
+        sym = self._symbol(code, market)
+        # 优先复用已缓存的历史（分析时 get_daily 先调用，缓存已足够）
+        cached = self._hist.get(sym)
+        if cached and (dt.datetime.now() - cached[0]).total_seconds() < 300 and not cached[1].empty:
+            df = cached[1]
+        else:
+            df = self._fetch_hist(sym, 5)
+        if df.empty:
+            return None
+        price   = float(df["Close"].iloc[-1])
+        pct_chg = 0.0
+        if len(df) >= 2:
+            prev    = float(df["Close"].iloc[-2])
+            pct_chg = (price - prev) / prev * 100 if prev else 0.0
+        volume = float(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0.0
+        return Quote(code=code, price=price, pct_change=pct_chg, amount=volume)
+
+
+# ---------------------------------------------------------------------------
+# 混合源：A 股用 AKShare/Tushare，HK/US 用 yfinance
+# ---------------------------------------------------------------------------
+
+class HybridSource(DataSource):
+    """A 股走 a_src，HK/US 走 yfinance。自动路由。"""
+    name = "hybrid"
+
+    def __init__(self, a_src: DataSource):
+        self._a   = a_src
+        self._yf  = None
+
+    def _yf_src(self) -> YFinanceSource:
+        if self._yf is None:
+            self._yf = YFinanceSource()
+        return self._yf
+
+    def _route(self, market: str) -> DataSource:
+        return self._a if market == "A" else self._yf_src()
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return f"hybrid({self._a.name}+yfinance)"
+
+    def get_daily(self, code, market, days=120):
+        result = self._route(market).get_daily(code, market, days)
+        # A 股 AKShare 失败时降级 yfinance
+        if not result and market == "A":
+            try:
+                result = self._yf_src().get_daily(code, market, days)
+            except Exception:
+                pass
+        return result
+
+    def get_quote(self, code, market):
+        result = self._route(market).get_quote(code, market)
+        # A 股 AKShare 失败时降级 yfinance
+        if result is None and market == "A":
+            try:
+                result = self._yf_src().get_quote(code, market)
+            except Exception:
+                pass
+        return result
+
+    def get_financials(self, code, market):
+        return self._a.get_financials(code, market)
+
+    def get_pe_percentile(self, code, market, years=3):
+        return self._a.get_pe_percentile(code, market, years)
+
+
+# ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
 
 def get_source() -> DataSource:
-    """根据环境变量自动选择数据源。无 token → AKShare-only。"""
+    """
+    优先级：
+      有 TUSHARE_TOKEN → HybridSource(TushareSource, YFinanceSource)
+      有 yfinance      → HybridSource(AKShareSource, YFinanceSource)
+      否则            → AKShareSource（降级）
+    """
     from config import TUSHARE_TOKEN_ENV
+
+    # A 股源
     token = os.environ.get(TUSHARE_TOKEN_ENV, "").strip()
     if token:
         try:
-            return TushareSource(token)
+            a_src = TushareSource(token)
         except Exception as e:
             print(f"[data_source] Tushare 初始化失败，降级 AKShare：{e}")
-    return AKShareSource()
+            a_src = AKShareSource()
+    else:
+        a_src = AKShareSource()
+
+    # 尝试构建混合源（需要 yfinance 已安装）
+    try:
+        import yfinance  # noqa: F401
+        return HybridSource(a_src)
+    except ImportError:
+        print("[data_source] yfinance 未安装，HK/US 数据降级 AKShare。pip install yfinance")
+        return a_src

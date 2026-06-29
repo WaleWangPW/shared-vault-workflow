@@ -114,6 +114,8 @@ PUSH = {
     "feishu_app_id_env":     "FEISHU_APP_ID",
     "feishu_app_secret_env": "FEISHU_APP_SECRET",
     "feishu_chat_id_env":    "FEISHU_CHAT_ID",
+    # newsagent 飞书群（在 .env 中填入对应群的 chat_id）
+    "newsagent_chat_id_env": "NEWSAGENT_CHAT_ID",
 }
 
 # ---------------- 数据源 ----------------

@@ -60,6 +60,12 @@ HELP_TEXT = """📋 股票助手指令手册
     例：减股 688008
   关注列表  → 查看当前关注股
 
+【选股扫描】
+  选股          → A股全市场（交互卡片）
+  选股 HK       → 港股扫描
+  选股 US       → 美股扫描
+  选股 A 半导体  → A股行业过滤
+
 【即时查询】
   查 <代码>   → 当前价/买点/止损
     例：查 688008
@@ -254,6 +260,47 @@ def _handle_text(text: str, client, chat_id: str) -> Optional[str]:
         except Exception as e:
             return f"⚠️ 日报触发失败：{e}"
 
+    # ── 选股 [A|HK|US|ALL] [行业] ────────────────────────────────────────────
+    if cmd == "选股":
+        from market_screener import run_market_screen
+        from feishu_card import build_screen_card
+        from push import send_feishu_card, notify_newsagent
+
+        MARKETS = {"A", "HK", "US", "ALL", "全部"}
+        market = "A"
+        sector_kw = ""
+        for p in parts[1:]:
+            if p.upper() in MARKETS:
+                market = "ALL" if p == "全部" else p.upper()
+            elif not p.startswith("-"):
+                sector_kw = p
+
+        _reply(client, chat_id, f"⏳ 正在扫描 {market} 市场，请稍候（约 30~60 秒）...")
+
+        text, results, n_scanned = run_market_screen(
+            market=market, sector_kw=sector_kw, top_n=10, structured=True
+        )
+
+        # 单市场发送交互卡片；ALL 降级为文本
+        card_sent = False
+        if results and market not in ("ALL", "全部"):
+            try:
+                card = build_screen_card(market, results, n_scanned, sector_kw)
+                r = send_feishu_card(card, chat_id)
+                card_sent = r.get("sent", False)
+            except Exception as e:
+                print(f"[feishu_handler] 卡片发送失败: {e}")
+
+        if not card_sent:
+            _reply(client, chat_id, text)
+
+        # 通知 newsagent：通过基础筛选的公司
+        passed_names = [r["name"] for r in results if r.get("basic_pass")][:8]
+        if passed_names:
+            notify_newsagent(passed_names)
+
+        return None  # 已通过 _reply/_card 回复，on_message 不需再 reply
+
     # 不是已知指令 → 忽略
     return None
 
@@ -265,7 +312,6 @@ def _make_handler(client):
     def on_message(data: P2ImMessageReceiveV1) -> None:
         try:
             msg = data.event.message
-            # 只处理 text 类型消息
             if msg.message_type != "text":
                 return
             chat_id     = msg.chat_id
@@ -282,6 +328,54 @@ def _make_handler(client):
     return on_message
 
 
+def _make_card_handler(client):
+    """
+    卡片按钮回调处理器。飞书在用户点击卡片按钮后，通过 WebSocket 推送
+    card.action.trigger 事件，这里解析 value.action 并执行相应操作。
+    """
+    def on_card_action(data) -> None:
+        try:
+            # data.event 可能是 dict 或对象，统一用 getattr/get 读取
+            ev = data.event if hasattr(data, "event") else {}
+            if isinstance(ev, dict):
+                action_val = ev.get("action", {}).get("value", {})
+                ctx        = ev.get("context", {})
+                chat_id    = ctx.get("open_chat_id", CHAT_ID)
+            else:
+                av_raw  = getattr(getattr(ev, "action", None), "value", None)
+                action_val = av_raw if isinstance(av_raw, dict) else {}
+                ctx_raw = getattr(ev, "context", None)
+                chat_id = (getattr(ctx_raw, "open_chat_id", None) or CHAT_ID)
+
+            action = action_val.get("action", "") if isinstance(action_val, dict) else ""
+            print(f"[card_action] action={action!r} val={action_val}")
+
+            if action == "watch":
+                code   = action_val.get("code", "")
+                name   = action_val.get("name", code)
+                market = action_val.get("market", "A")
+
+                from holdings_store import add_to_watchlist
+                result = add_to_watchlist(code, name, market)
+                print(f"[card_action] {result}")
+
+                # 发送确认卡片
+                from feishu_card import build_watchlist_confirm_card
+                from push import send_feishu_card, notify_newsagent
+                confirm = build_watchlist_confirm_card(code, name, market)
+                r = send_feishu_card(confirm, chat_id)
+                if not r.get("sent"):
+                    _reply(client, chat_id, f"✅ {result}")
+
+                # 通知 newsagent 搜索该公司
+                notify_newsagent([name])
+
+        except Exception as e:
+            print(f"[card_action] 处理出错: {e}")
+
+    return on_card_action
+
+
 # ── 主入口 ───────────────────────────────────────────────────────────────────
 
 def main(once: bool = False):
@@ -291,7 +385,6 @@ def main(once: bool = False):
 
     lark = _get_lark()
 
-    # 构建 HTTP 客户端（用于主动发消息）
     client = (lark.Client.builder()
               .app_id(APP_ID)
               .app_secret(APP_SECRET)
@@ -306,19 +399,22 @@ def main(once: bool = False):
         _reply(client, CHAT_ID, "🤖 股票助手已启动（测试 ping），发送「帮助」查看指令")
         return
 
-    ws_client = (lark.ws.Client(
+    event_handler = (
+        lark.EventDispatcherHandler.builder("", "")
+        .register_p2_im_message_receive_v1(_make_handler(client))
+        .register_customized_event("card.action.trigger", _make_card_handler(client))
+        .build()
+    )
+
+    ws_client = lark.ws.Client(
         APP_ID, APP_SECRET,
-        event_handler=(
-            lark.EventDispatcherHandler.builder("", "")
-            .register_p2_im_message_receive_v1(_make_handler(client))
-            .build()
-        ),
+        event_handler=event_handler,
         log_level=lark.LogLevel.WARNING,
-    ))
+    )
 
     print("[feishu_handler] 🚀 连接飞书 WebSocket 长连接...")
-    print("  发送「帮助」到飞书群可查看所有指令")
-    print("  按 Ctrl+C 停止")
+    print("  功能：文字指令 + 卡片按钮（加入关注）+ newsagent 联动")
+    print("  发送「帮助」查看所有指令，按 Ctrl+C 停止")
     ws_client.start()
 
 

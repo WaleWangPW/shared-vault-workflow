@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 import os, json, urllib.request
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 from config import PUSH
 
 
@@ -67,6 +67,41 @@ def _send_via_app(text: str, app_id: str, app_secret: str, chat_id: str) -> Dict
         {"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
     return {"sent": r["ok"], **({"resp": r["resp"]} if r["ok"] else {"reason": r["reason"]})}
+
+
+def send_feishu_card(card: dict, chat_id: str = None) -> Dict:
+    """发送飞书交互卡片（需要 App API；webhook 不支持 interactive 类型）。"""
+    app_id     = os.environ.get(PUSH["feishu_app_id_env"], "").strip()
+    app_secret = os.environ.get(PUSH["feishu_app_secret_env"], "").strip()
+    cid        = chat_id or os.environ.get(PUSH["feishu_chat_id_env"], "").strip()
+    if not (app_id and app_secret and cid):
+        return {"sent": False, "reason": "需要配置 FEISHU_APP_ID/SECRET/CHAT_ID"}
+    token = _get_tenant_token(app_id, app_secret)
+    if not token:
+        return {"sent": False, "reason": "获取 tenant_access_token 失败"}
+    r = _http_post(
+        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        {"receive_id": cid, "msg_type": "interactive",
+         "content": json.dumps(card)},
+        {"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    return {"sent": r["ok"], **({"resp": r["resp"]} if r["ok"] else {"reason": r["reason"]})}
+
+
+def notify_newsagent(stock_names: List[str], chat_id: str = None) -> Dict:
+    """向 newsagent 飞书群发送公司新闻搜索请求。"""
+    cid = chat_id or os.environ.get(
+        PUSH.get("newsagent_chat_id_env", "NEWSAGENT_CHAT_ID"), "").strip()
+    if not cid:
+        return {"sent": False, "reason": "未配置 NEWSAGENT_CHAT_ID"}
+    if not stock_names:
+        return {"sent": False, "reason": "无股票名称"}
+    app_id     = os.environ.get(PUSH["feishu_app_id_env"], "").strip()
+    app_secret = os.environ.get(PUSH["feishu_app_secret_env"], "").strip()
+    names_str  = " / ".join(stock_names[:10])
+    text = (f"📰 请搜索以下公司近期动态：\n{names_str}\n\n"
+            f"关注点：财报公告、重大合同、高管变动、行业政策、机构评级")
+    return _send_via_app(text, app_id, app_secret, cid)
 
 
 def send_feishu(text: str) -> Dict:

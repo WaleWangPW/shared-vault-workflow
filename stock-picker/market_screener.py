@@ -138,13 +138,13 @@ def screen_a(top_n: int = 10, deep_n: int = 40, sector_kw: str = "") -> str:
 
     token = os.environ.get("TUSHARE_TOKEN", "").strip()
     if not token:
-        return "⚠️ A股选股需要 Tushare Token，请在 .env 配置 TUSHARE_TOKEN=xxx"
+        return "⚠️ A股选股需要 Tushare Token，请在 .env 配置 TUSHARE_TOKEN=xxx", [], 0
     try:
         import tushare as ts
         ts.set_token(token)
         pro = ts.pro_api()
     except Exception as e:
-        return f"❌ Tushare 初始化失败: {e}"
+        return f"❌ Tushare 初始化失败: {e}", [], 0
 
     today = dt.date.today()
     src   = get_source()
@@ -165,7 +165,7 @@ def screen_a(top_n: int = 10, deep_n: int = 40, sector_kw: str = "") -> str:
             pass
 
     if daily_df is None or daily_df.empty:
-        return "❌ 无法获取A股行情数据，请检查网络"
+        return "❌ 无法获取A股行情数据，请检查网络", [], 0
 
     merged = daily_df.merge(basic_df, on="ts_code", how="inner")
 
@@ -244,23 +244,24 @@ def screen_a(top_n: int = 10, deep_n: int = 40, sector_kw: str = "") -> str:
             pass
 
     if not results:
-        return "⚠️ A股: 未找到符合条件的股票"
+        return "⚠️ A股: 未找到符合条件的股票", [], 0
 
     top, n_passed = _rank_and_slice(results, top_n)
+    n_scanned = len(candidates)
     lines = [
         f"🇨🇳 A股选股  {today}  {label}",
-        f"扫描 {len(candidates)} 只 → 通过基础筛选 {n_passed} 只\n",
+        f"扫描 {n_scanned} 只 → 通过基础筛选 {n_passed} 只\n",
     ]
     for r in top:
         lines.extend(_fmt_result(r, "¥"))
     lines.append("\n📌 `加股 <代码> <名称> A` 加入关注  `查 <代码>` 深入分析")
     lines.append("⚠️ 仅供研究学习，不构成投资建议")
-    return "\n".join(lines)
+    return "\n".join(lines), top, n_scanned
 
 
 # ── 港股 ──────────────────────────────────────────────────────────────────────
 
-def screen_hk(top_n: int = 10, deep_n: int = 30) -> str:
+def screen_hk(top_n: int = 10, deep_n: int = 30) -> tuple:
     """港股选股：AKShare 全港行情 → 批量 yfinance 历史 → 技术面评分。"""
     from buy_point import calculate_buy_point
     from config import SCREEN_HK
@@ -272,10 +273,10 @@ def screen_hk(top_n: int = 10, deep_n: int = 30) -> str:
         import akshare as ak
         spot = ak.stock_hk_spot_em()
     except Exception as e:
-        return f"❌ 港股行情拉取失败: {e}"
+        return f"❌ 港股行情拉取失败: {e}", [], 0
 
     if spot is None or spot.empty:
-        return "❌ 港股行情数据为空"
+        return "❌ 港股行情数据为空", [], 0
 
     for col in ("成交额", "市盈率(静)", "最新价", "总市值"):
         if col in spot.columns:
@@ -309,13 +310,13 @@ def screen_hk(top_n: int = 10, deep_n: int = 30) -> str:
             pass
 
     if not yf_codes:
-        return "⚠️ 港股: 无有效代码"
+        return "⚠️ 港股: 无有效代码", [], 0
 
     try:
         import yfinance as yf
         raw = yf.download(yf_codes, period="252d", progress=False, auto_adjust=True)
     except Exception as e:
-        return f"❌ 港股历史数据拉取失败: {e}"
+        return f"❌ 港股历史数据拉取失败: {e}", [], 0
 
     # 解析收盘价
     def _get_closes(ticker: str) -> List[float]:
@@ -354,23 +355,24 @@ def screen_hk(top_n: int = 10, deep_n: int = 30) -> str:
         })
 
     if not results:
-        return "⚠️ 港股: 历史数据不足，无法生成结果"
+        return "⚠️ 港股: 历史数据不足，无法生成结果", [], 0
 
     top, _ = _rank_and_slice(results, top_n)
+    n_scanned = len(candidates)
     lines = [
         f"🇭🇰 港股选股  {today}",
-        f"扫描 {len(candidates)} 只 → 得分前 {len(top)} 只（纯技术面）\n",
+        f"扫描 {n_scanned} 只 → 得分前 {len(top)} 只（纯技术面）\n",
     ]
     for r in top:
         lines.extend(_fmt_result(r, "HK$"))
     lines.append("\n📌 `加股 <代码> <名称> HK` 加入关注")
     lines.append("⚠️ 港股为技术面评分，无A股财报深度。仅供研究，非投资建议")
-    return "\n".join(lines)
+    return "\n".join(lines), top, n_scanned
 
 
 # ── 美股 ──────────────────────────────────────────────────────────────────────
 
-def screen_us(top_n: int = 10, deep_n: int = 30) -> str:
+def screen_us(top_n: int = 10, deep_n: int = 30) -> tuple:
     """美股选股：Nasdaq100/S&P500 Universe → yfinance 批量历史 → 技术面评分。"""
     from buy_point import calculate_buy_point
 
@@ -384,7 +386,7 @@ def screen_us(top_n: int = 10, deep_n: int = 30) -> str:
             progress=False, auto_adjust=True
         )
     except Exception as e:
-        return f"❌ 美股数据拉取失败: {e}"
+        return f"❌ 美股数据拉取失败: {e}", [], 0
 
     # 解析每只票收盘价
     def _get_closes(ticker: str) -> List[float]:
@@ -445,35 +447,46 @@ def screen_us(top_n: int = 10, deep_n: int = 30) -> str:
         })
 
     if not results:
-        return "⚠️ 美股: 未找到数据"
+        return "⚠️ 美股: 未找到数据", [], 0
 
     top, _ = _rank_and_slice(results, top_n)
+    n_scanned = len(price_map)
     lines = [
         f"🇺🇸 美股选股  {today}",
-        f"扫描 {len(price_map)} 只 → 得分前 {len(top)} 只（纯技术面）\n",
+        f"扫描 {n_scanned} 只 → 得分前 {len(top)} 只（纯技术面）\n",
     ]
     for r in top:
         lines.extend(_fmt_result(r, "$"))
     lines.append("\n📌 `加股 <代码> <名称> US` 加入关注")
     lines.append("⚠️ 美股为技术面评分，无A股财报深度。仅供研究，非投资建议")
-    return "\n".join(lines)
+    return "\n".join(lines), top, n_scanned
 
 
 # ── 主入口 ───────────────────────────────────────────────────────────────────
 
 def run_market_screen(market: str = "A", sector_kw: str = "",
-                      top_n: int = 10, deep_n: int = 40) -> str:
+                      top_n: int = 10, deep_n: int = 40,
+                      structured: bool = False):
+    """
+    structured=False → 返回格式化文本（供 CLI 使用）
+    structured=True  → 返回 (text, results, n_scanned)（供飞书卡片使用）
+    """
     m = market.upper()
     if m == "HK":
-        return screen_hk(top_n=top_n, deep_n=min(deep_n, 30))
-    if m == "US":
-        return screen_us(top_n=top_n, deep_n=min(deep_n, 30))
-    if m in ("ALL", "全部"):
+        text, res, n = screen_hk(top_n=top_n, deep_n=min(deep_n, 30))
+    elif m == "US":
+        text, res, n = screen_us(top_n=top_n, deep_n=min(deep_n, 30))
+    elif m in ("ALL", "全部"):
+        ta, ra, na = screen_a(top_n=top_n, deep_n=deep_n, sector_kw=sector_kw)
+        th, rh, nh = screen_hk(top_n=top_n, deep_n=min(deep_n, 20))
+        tu, ru, nu = screen_us(top_n=top_n, deep_n=min(deep_n, 20))
         sep = "\n" + "─" * 40 + "\n"
-        return sep.join([
-            screen_a(top_n=top_n, deep_n=deep_n, sector_kw=sector_kw),
-            screen_hk(top_n=top_n, deep_n=min(deep_n, 20)),
-            screen_us(top_n=top_n, deep_n=min(deep_n, 20)),
-        ])
-    # 默认 A 股（含行业关键词兜底）
-    return screen_a(top_n=top_n, deep_n=deep_n, sector_kw=sector_kw if m == "A" else market)
+        text = sep.join([ta, th, tu])
+        res, n = [], na + nh + nu  # ALL 模式不合并 results（市场不同）
+    else:
+        kw = sector_kw if m == "A" else market
+        text, res, n = screen_a(top_n=top_n, deep_n=deep_n, sector_kw=kw)
+
+    if structured:
+        return text, res, n
+    return text

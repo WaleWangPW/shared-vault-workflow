@@ -26,6 +26,32 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
+
+def _load_dotenv():
+    """从脚本同目录的 .env 自动加载环境变量（支持有/无 export 前缀）。
+    已存在于 os.environ 的变量不覆盖，确保 shell 层面 export 的优先级更高。
+    """
+    env_path = os.path.join(_DIR, ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
+_load_dotenv()
+
 from holdings_store import (
     load_holdings, add_holding, remove_holding,
     add_to_watchlist, remove_from_watchlist,

@@ -343,6 +343,64 @@ def cmd_guanzhu_list():
     return "\n".join(lines)
 
 
+# ── 选股 ───────────────────────────────────────────────────────────────────────
+
+def cmd_xuangu(args):
+    """全市场选股扫描，支持可选行业关键词。"""
+    from market_screener import run_market_screen
+    sector_kw = args[0] if args else ""
+    top_n = 10
+    deep_n = 40
+    for i, a in enumerate(args):
+        if a in ("-n", "--top") and i + 1 < len(args):
+            try:
+                top_n = int(args[i + 1])
+            except ValueError:
+                pass
+    return run_market_screen(sector_kw=sector_kw, top_n=top_n, deep_n=deep_n)
+
+
+# ── 诊断 ───────────────────────────────────────────────────────────────────────
+
+def cmd_zhenduan():
+    """快速验证各市场行情，并显示数据源和凭证配置状态。"""
+    import os
+    lines = [f"🔧 数据源诊断  {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+
+    src = _get_src()
+    if src is None:
+        return "❌ 数据源初始化失败，请检查依赖包"
+    lines.append(f"数据源: {src.name}")
+
+    # 快速测试各市场（用持仓/关注列表里的真实代码）
+    wl = effective_watchlist(WATCHLIST)
+    holdings = load_holdings()
+    test_cases: list = []
+    for market in ("A", "HK", "US"):
+        c = next((w for w in wl if w.get("market") == market and w.get("code")), None)
+        if c:
+            test_cases.append((c["name"], c["code"], market))
+
+    lines.append("")
+    for label, code, market in test_cases:
+        try:
+            q = src.get_quote(code, market)
+            if q and q.price:
+                pe_part = f"  PE={q.pe_ttm:.1f}" if q.pe_ttm else ""
+                lines.append(f"✅ {market} {label}({code}): ¥{q.price:.3f}  {q.pct_change:+.2f}%{pe_part}")
+            else:
+                lines.append(f"⚠️ {market} {label}({code}): 无行情（非交易日/网络）")
+        except Exception as e:
+            lines.append(f"❌ {market} {label}({code}): {str(e)[:80]}")
+
+    lines.append("")
+    token = os.environ.get("TUSHARE_TOKEN", "").strip()
+    lines.append(f"Tushare: {'✅ 已配置（A股财报+PE历史分位）' if token else '⚠️ 未配置（无A股财报，仅技术面）'}")
+    app_id = os.environ.get("FEISHU_APP_ID", "").strip()
+    lines.append(f"飞书推送: {'✅ 已配置' if app_id else '⚠️ 未配置'}")
+    return "\n".join(lines)
+
+
 # ── 工具 ───────────────────────────────────────────────────────────────────────
 
 def _get_src():
@@ -364,6 +422,8 @@ HELP = """📋 股票助手指令
   关注列表                          查看全部关注股
   查 <代码>                         查 688008
   日报                              立即触发选股日报
+  选股 [行业关键词]                 全市场A股扫描，如：选股 半导体
+  诊断                              验证数据源和凭证配置
 
 HK代码支持 HK6082 或 06082 两种格式（自动转换）
 ⚠️ 仅供研究学习，不构成投资建议"""
@@ -391,6 +451,8 @@ def main():
         "减股":   lambda: remove_from_watchlist(_norm(rest[0])) if rest else "格式：减股 <代码>",
         "查":     lambda: cmd_cha(rest),
         "日报":   lambda: cmd_ribao(),
+        "选股":   lambda: cmd_xuangu(rest),
+        "诊断":   lambda: cmd_zhenduan(),
         "帮助":   lambda: HELP,
         "help":   lambda: HELP,
     }

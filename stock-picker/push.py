@@ -97,7 +97,9 @@ def send_feishu_card(card: dict, chat_id: str = None) -> Dict:
 
 
 def notify_newsagent(stock_names: List[str], chat_id: str = None) -> Dict:
-    """向 newsagent 飞书群发送公司新闻搜索请求。"""
+    """向 newsagent 发送新闻查询请求。
+    stock_names 可以是公司名列表（自动组合成请求），或包含一条完整消息字符串的单元素列表。
+    """
     cid = chat_id or os.environ.get(
         PUSH.get("newsagent_chat_id_env", "NEWSAGENT_CHAT_ID"), "").strip()
     if not cid:
@@ -106,9 +108,13 @@ def notify_newsagent(stock_names: List[str], chat_id: str = None) -> Dict:
         return {"sent": False, "reason": "无股票名称"}
     app_id     = os.environ.get(PUSH["feishu_app_id_env"], "").strip()
     app_secret = os.environ.get(PUSH["feishu_app_secret_env"], "").strip()
-    names_str  = " / ".join(stock_names[:10])
-    text = (f"📰 请搜索以下公司近期动态：\n{names_str}\n\n"
-            f"关注点：财报公告、重大合同、高管变动、行业政策、机构评级")
+    # 如果只有一条且内容较长，直接当消息体发送
+    if len(stock_names) == 1 and len(stock_names[0]) > 30:
+        text = stock_names[0]
+    else:
+        names_str = " / ".join(stock_names[:10])
+        text = (f"📰 请搜索以下公司近期动态：\n{names_str}\n\n"
+                f"关注点：财报公告、重大合同、高管变动、行业政策、机构评级")
     return _send_via_app(text, app_id, app_secret, cid)
 
 

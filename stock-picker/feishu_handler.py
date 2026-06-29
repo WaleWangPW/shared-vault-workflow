@@ -401,6 +401,26 @@ def _make_card_handler(client):
                 # 通知 newsagent 搜索该公司
                 notify_newsagent([name])
 
+            elif action == "news":
+                code   = action_val.get("code", "")
+                name   = action_val.get("name", code)
+                from push import notify_newsagent
+                msg = (
+                    f"请搜索并回复 {name}（{code}）的以下信息：\n"
+                    f"1. 公司主营业务简介（2-3句话）\n"
+                    f"2. 近期重要公告或财报摘要\n"
+                    f"3. 行业地位和核心竞争优势\n"
+                    f"4. 近期值得关注的新闻或风险\n"
+                    f"请简洁回复，突出关键信息。"
+                )
+                r = notify_newsagent([msg])
+                if r.get("sent"):
+                    _reply(client, chat_id,
+                           f"📰 已向 AI资讯助手 发送 {name} 的信息查询请求，请稍候查看回复")
+                else:
+                    _reply(client, chat_id,
+                           f"⚠️ 发送失败，请检查 NEWSAGENT_CHAT_ID 配置")
+
         except Exception as e:
             print(f"[card_action] 处理出错: {e}")
 

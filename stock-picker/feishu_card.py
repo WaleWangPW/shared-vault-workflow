@@ -75,17 +75,33 @@ def build_screen_card(market: str, results: List[Dict],
         elements.append({
             "tag": "div",
             "text": {"tag": "lark_md", "content": "\n".join(lines)},
-            "extra": {
-                "tag": "button",
-                "text": {"tag": "plain_text", "content": "⭐ 加入关注"},
-                "type": "primary" if r["basic_pass"] else "default",
-                "value": {
-                    "action": "watch",
-                    "code":   r["code"],
-                    "name":   r["name"],
-                    "market": market.upper(),
+        })
+        elements.append({
+            "tag": "action",
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "⭐ 加入关注"},
+                    "type": "primary" if r["basic_pass"] else "default",
+                    "value": {
+                        "action": "watch",
+                        "code":   r["code"],
+                        "name":   r["name"],
+                        "market": market.upper(),
+                    },
                 },
-            },
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": "📰 公司动态"},
+                    "type": "default",
+                    "value": {
+                        "action": "news",
+                        "code":   r["code"],
+                        "name":   r["name"],
+                        "market": market.upper(),
+                    },
+                },
+            ],
         })
         elements.append({"tag": "hr"})
 

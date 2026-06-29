@@ -56,12 +56,20 @@ def _get_tenant_token(app_id: str, app_secret: str) -> Optional[str]:
     return data.get("tenant_access_token")
 
 
+def _id_type(receive_id: str) -> str:
+    """自动识别飞书 ID 类型：ou_xxx=open_id，oc_xxx/p2p_xxx=chat_id。"""
+    if receive_id.startswith("ou_"):
+        return "open_id"
+    return "chat_id"
+
+
 def _send_via_app(text: str, app_id: str, app_secret: str, chat_id: str) -> Dict:
     token = _get_tenant_token(app_id, app_secret)
     if not token:
         return {"sent": False, "reason": "获取 tenant_access_token 失败"}
+    id_type = _id_type(chat_id)
     r = _http_post(
-        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={id_type}",
         {"receive_id": chat_id, "msg_type": "text",
          "content": json.dumps({"text": text})},
         {"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
@@ -80,7 +88,7 @@ def send_feishu_card(card: dict, chat_id: str = None) -> Dict:
     if not token:
         return {"sent": False, "reason": "获取 tenant_access_token 失败"}
     r = _http_post(
-        "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
+        f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={_id_type(cid)}",
         {"receive_id": cid, "msg_type": "interactive",
          "content": json.dumps(card)},
         {"Content-Type": "application/json", "Authorization": f"Bearer {token}"},

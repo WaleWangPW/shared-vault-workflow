@@ -73,6 +73,8 @@ class AKShareSource(DataSource):
         self.ak = ak
         self._spot_df: Optional[pd.DataFrame] = None
         self._spot_date: str = ""
+        self._hk_spot_df: Optional[pd.DataFrame] = None
+        self._hk_spot_date: str = ""
 
     def _date_range(self, days: int):
         end = dt.date.today().strftime("%Y%m%d")
@@ -80,12 +82,20 @@ class AKShareSource(DataSource):
         return start, end
 
     def _spot_cache(self) -> pd.DataFrame:
-        """东方财富全量 A 股实时行情（同一天内复用，避免重复下载）。"""
+        """东方财富全量 A 股实时行情（同日复用）。"""
         today = dt.date.today().isoformat()
         if self._spot_df is None or self._spot_date != today:
             self._spot_df = self.ak.stock_zh_a_spot_em()
             self._spot_date = today
         return self._spot_df
+
+    def _hk_spot_cache(self) -> pd.DataFrame:
+        """东方财富港股实时行情（同日复用）。"""
+        today = dt.date.today().isoformat()
+        if self._hk_spot_df is None or self._hk_spot_date != today:
+            self._hk_spot_df = self.ak.stock_hk_spot_em()
+            self._hk_spot_date = today
+        return self._hk_spot_df
 
     def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
         ak = self.ak
@@ -136,6 +146,34 @@ class AKShareSource(DataSource):
                 return Quote(code=code, name=name,
                              price=price, pct_change=pct_chg,
                              amount=amount, market_cap=market_cap, pe_ttm=pe_ttm)
+            elif market == "HK":
+                # 从港股实时行情取名称/涨跌幅/成交额/PE
+                name, pct_chg, amount, pe_ttm, price = "", 0.0, 0.0, None, 0.0
+                try:
+                    spot = self._hk_spot_cache()
+                    # AKShare 港股代码列通常为 5 位字符串，如 "06809"
+                    row = spot[spot["代码"] == code]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        name    = str(r.get("名称", ""))
+                        price   = float(r.get("最新价") or 0)
+                        pct_raw = r.get("涨跌幅")
+                        if pct_raw is not None and str(pct_raw) not in ("", "nan", "None", "-"):
+                            pct_chg = float(pct_raw)
+                        amt = r.get("成交额")
+                        if amt is not None:
+                            amount = float(amt)
+                        pe_raw = r.get("市盈率(静)") or r.get("市盈率")
+                        if pe_raw is not None and str(pe_raw) not in ("", "nan", "None", "-"):
+                            v = float(pe_raw)
+                            pe_ttm = v if v > 0 else None
+                except Exception:
+                    pass
+                if not price:
+                    prices = self.get_daily(code, market, 2)
+                    price = float(prices[-1]) if prices else 0.0
+                return Quote(code=code, name=name, price=price,
+                             pct_change=pct_chg, amount=amount, pe_ttm=pe_ttm)
             else:
                 prices = self.get_daily(code, market, 2)
                 return Quote(code=code, price=float(prices[-1]) if prices else 0.0)

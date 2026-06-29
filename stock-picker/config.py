@@ -15,7 +15,7 @@ WATCHLIST = [
     {"name": "Circle",     "code": "CRCL",   "market": "US", "note": "稳定币 USDC"},
     {"name": "智谱",       "code": "",       "market": "PRIMARY", "note": "跟踪 IPO 动态"},
     {"name": "MiniMax",    "code": "",       "market": "PRIMARY", "note": "跟踪 IPO 动态"},
-    {"name": "壁仞科技",   "code": "",       "market": "PRIMARY", "note": "跟踪 IPO 进展"},
+    {"name": "壁仞科技",   "code": "06082",  "market": "HK", "note": "AI芯片，2026年港交所上市"},
 ]
 
 # ---------------- 题材池 ----------------

@@ -422,12 +422,16 @@ def main(once: bool = False):
         _reply(client, CHAT_ID, "🤖 股票助手已启动（测试 ping），发送「帮助」查看指令")
         return
 
-    event_handler = (
-        lark.EventDispatcherHandler.builder("", "")
-        .register_p2_im_message_receive_v1(_make_handler(client))
-        .register_customized_event("card.action.trigger", _make_card_handler(client))
-        .build()
-    )
+    eb = (lark.EventDispatcherHandler.builder("", "")
+          .register_p2_im_message_receive_v1(_make_handler(client)))
+    try:
+        eb = eb.register_customized_event("card.action.trigger",
+                                          _make_card_handler(client))
+        print("[feishu_handler] ✅ 卡片按钮回调已注册")
+    except AttributeError:
+        print("[feishu_handler] ⚠️ lark-oapi 版本不支持卡片回调，"
+              "升级后可启用：pip install -U lark-oapi")
+    event_handler = eb.build()
 
     ws_client = lark.ws.Client(
         APP_ID, APP_SECRET,

@@ -135,6 +135,7 @@ def cmd_fenxi():
             market = next((w["market"] for w in wl if w["code"] == code), "A")
 
             q = bp = None
+            f_data = None
             prices = []
             try:
                 if src:
@@ -142,6 +143,8 @@ def cmd_fenxi():
                     q = src.get_quote(code, market)
                     if prices:
                         bp = calculate_buy_point(prices)
+                    if market == "A":
+                        f_data = src.get_financials(code, market)
             except Exception:
                 pass
 
@@ -150,6 +153,7 @@ def cmd_fenxi():
             pnl_pct   = (cur - cost) / cost * 100 if cur and cost else None
             mkt_val   = cur * shs if cur else None
 
+            pe_str    = f"  PE={q.pe_ttm:.1f}" if q and q.pe_ttm else ""
             pct_str   = f"  今日{pct:+.2f}%" if pct is not None else ""
             price_str = f"¥{cur:.3f}" if cur else "N/A"
             pnl_str   = f"{pnl_pct:+.1f}%" if pnl_pct is not None else "N/A"
@@ -159,8 +163,21 @@ def cmd_fenxi():
                 total_cost += cost * shs
                 total_val  += cur * shs
 
-            lines.append(f"\n{name}({code}/{market})  {price_str}{pct_str}")
+            lines.append(f"\n{name}({code}/{market})  {price_str}{pct_str}{pe_str}")
             lines.append(f"  成本¥{cost} × {shs}股  盈亏{pnl_str}  市值{val_str}")
+
+            # 基本面（A股 Tushare 模式下有数据）
+            if f_data:
+                fparts = []
+                if f_data.revenue_growth_yoy is not None:
+                    fparts.append(f"营收增速{f_data.revenue_growth_yoy*100:+.0f}%")
+                if f_data.profit_growth_yoy is not None:
+                    fparts.append(f"利润增速{f_data.profit_growth_yoy*100:+.0f}%")
+                if f_data.operating_cashflow is not None:
+                    cf = f_data.operating_cashflow / 1e8
+                    fparts.append(f"经营现金流{cf:+.1f}亿")
+                if fparts:
+                    lines.append(f"  基本面: {' | '.join(fparts)}")
 
             if bp and not bp.get("error"):
                 buy_pt   = bp.get("buy_point")
@@ -193,7 +210,8 @@ def cmd_fenxi():
                 if signals:
                     lines.append(f"  信号: {' | '.join(signals)}")
             else:
-                lines.append("  数据不足，无法计算买点")
+                err_msg = bp.get("error", "数据不足") if bp else "数据不足"
+                lines.append(f"  {err_msg}")
 
         if total_cost > 0:
             lines.append(f"\n持仓总盈亏: {(total_val-total_cost)/total_cost*100:+.1f}%  总市值¥{total_val:,.0f}")
@@ -343,6 +361,47 @@ def cmd_guanzhu_list():
     return "\n".join(lines)
 
 
+# ── 诊断 ───────────────────────────────────────────────────────────────────────
+
+def cmd_zhenduan():
+    """快速验证各市场行情，并显示数据源和凭证配置状态。"""
+    import os
+    lines = [f"🔧 数据源诊断  {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+
+    src = _get_src()
+    if src is None:
+        return "❌ 数据源初始化失败，请检查依赖包"
+    lines.append(f"数据源: {src.name}")
+
+    # 快速测试各市场（用持仓/关注列表里的真实代码）
+    wl = effective_watchlist(WATCHLIST)
+    holdings = load_holdings()
+    test_cases: list = []
+    for market in ("A", "HK", "US"):
+        c = next((w for w in wl if w.get("market") == market and w.get("code")), None)
+        if c:
+            test_cases.append((c["name"], c["code"], market))
+
+    lines.append("")
+    for label, code, market in test_cases:
+        try:
+            q = src.get_quote(code, market)
+            if q and q.price:
+                pe_part = f"  PE={q.pe_ttm:.1f}" if q.pe_ttm else ""
+                lines.append(f"✅ {market} {label}({code}): ¥{q.price:.3f}  {q.pct_change:+.2f}%{pe_part}")
+            else:
+                lines.append(f"⚠️ {market} {label}({code}): 无行情（非交易日/网络）")
+        except Exception as e:
+            lines.append(f"❌ {market} {label}({code}): {str(e)[:80]}")
+
+    lines.append("")
+    token = os.environ.get("TUSHARE_TOKEN", "").strip()
+    lines.append(f"Tushare: {'✅ 已配置（A股财报+PE历史分位）' if token else '⚠️ 未配置（无A股财报，仅技术面）'}")
+    app_id = os.environ.get("FEISHU_APP_ID", "").strip()
+    lines.append(f"飞书推送: {'✅ 已配置' if app_id else '⚠️ 未配置'}")
+    return "\n".join(lines)
+
+
 # ── 工具 ───────────────────────────────────────────────────────────────────────
 
 def _get_src():
@@ -364,6 +423,7 @@ HELP = """📋 股票助手指令
   关注列表                          查看全部关注股
   查 <代码>                         查 688008
   日报                              立即触发选股日报
+  诊断                              验证数据源和凭证配置
 
 HK代码支持 HK6082 或 06082 两种格式（自动转换）
 ⚠️ 仅供研究学习，不构成投资建议"""
@@ -391,6 +451,7 @@ def main():
         "减股":   lambda: remove_from_watchlist(_norm(rest[0])) if rest else "格式：减股 <代码>",
         "查":     lambda: cmd_cha(rest),
         "日报":   lambda: cmd_ribao(),
+        "诊断":   lambda: cmd_zhenduan(),
         "帮助":   lambda: HELP,
         "help":   lambda: HELP,
     }

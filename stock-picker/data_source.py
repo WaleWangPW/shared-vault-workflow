@@ -121,30 +121,39 @@ class AKShareSource(DataSource):
         ak = self.ak
         try:
             if market == "A":
-                start, end = self._date_range(5)
-                hist = ak.stock_zh_a_hist(symbol=code, period="daily",
-                                          start_date=start, end_date=end, adjust="qfq")
-                price  = float(hist["收盘"].iloc[-1])
-                amount = float(hist["成交额"].iloc[-1]) if "成交额" in hist.columns else 0.0
-                pct_chg = float(hist["涨跌幅"].iloc[-1]) if "涨跌幅" in hist.columns else 0.0
-
-                # 市值 / PE / 名称 —— 从全量实时行情缓存中取
-                market_cap, pe_ttm, name = 0.0, None, ""
+                # 优先用东财实时行情快照（含最新价/涨跌幅/市值/PE，一次调用搞定）
+                name, price, pct_chg, amount, market_cap, pe_ttm = "", 0.0, 0.0, 0.0, 0.0, None
                 try:
                     spot = self._spot_cache()
                     row = spot[spot["代码"] == code]
                     if not row.empty:
                         r = row.iloc[0]
                         name = str(r.get("名称", ""))
+                        price = float(r.get("最新价") or 0)
+                        pct_raw = r.get("涨跌幅")
+                        if pct_raw is not None and str(pct_raw) not in ("-", "nan", "None", ""):
+                            pct_chg = float(pct_raw)
+                        amt = r.get("成交额")
+                        if amt is not None:
+                            amount = float(amt)
                         mc = r.get("总市值")
                         if mc is not None:
-                            market_cap = float(mc)  # 单位：元
+                            market_cap = float(mc)
                         pe_raw = r.get("市盈率-动态")
                         if pe_raw is not None and str(pe_raw) not in ("-", "nan", "None", ""):
                             v = float(pe_raw)
                             pe_ttm = v if v > 0 else None
                 except Exception:
                     pass
+
+                # 快照取价失败时，降级取历史收盘
+                if not price:
+                    start, end = self._date_range(5)
+                    hist = ak.stock_zh_a_hist(symbol=code, period="daily",
+                                              start_date=start, end_date=end, adjust="qfq")
+                    price   = float(hist["收盘"].iloc[-1])
+                    amount  = float(hist["成交额"].iloc[-1]) if "成交额" in hist.columns else 0.0
+                    pct_chg = float(hist["涨跌幅"].iloc[-1]) if "涨跌幅" in hist.columns else 0.0
 
                 return Quote(code=code, name=name,
                              price=price, pct_change=pct_chg,

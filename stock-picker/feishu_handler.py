@@ -425,12 +425,10 @@ def main(once: bool = False):
     eb = (lark.EventDispatcherHandler.builder("", "")
           .register_p2_im_message_receive_v1(_make_handler(client)))
     try:
-        eb = eb.register_customized_event("card.action.trigger",
-                                          _make_card_handler(client))
+        eb = eb.register_p2_card_action_trigger(_make_card_handler(client))
         print("[feishu_handler] ✅ 卡片按钮回调已注册")
     except AttributeError:
-        print("[feishu_handler] ⚠️ lark-oapi 版本不支持卡片回调，"
-              "升级后可启用：pip install -U lark-oapi")
+        print("[feishu_handler] ⚠️ 卡片回调注册失败，文字指令仍可用")
     event_handler = eb.build()
 
     ws_client = lark.ws.Client(

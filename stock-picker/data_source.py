@@ -2,11 +2,14 @@
 """
 数据源抽象层。
 
-- AKShareSource：免费，行情 + 基础估值（底层爬东财/新浪）。无需 token。
-- TushareSource：付费 ¥1000/年，财报 + 估值 + 机构持仓。需 TUSHARE_TOKEN。
+- AKShareSource：免费，A 股行情 + 基础估值（东财/新浪）。无 token。
+- YFinanceSource：免费，HK/US 行情（Yahoo Finance，全球可用）。无 token。
+- TushareSource：付费 ¥1000/年，A 股财报 + 估值 + 机构持仓。需 TUSHARE_TOKEN。
+- HybridSource：A 股用 AKShare，HK/US 自动切换 yfinance（推荐）。
 
-未配置 token 时，get_source() 自动返回 AKShare-only 源（财务字段返回 None，
-screener 会据此跳过依赖财报的条件，仅做行情+技术面筛选）。
+get_source() 优先级：
+  有 TUSHARE_TOKEN → TushareSource（A股财务）+ YFinanceSource（HK/US）
+  无 token        → AKShareSource（A股）+ YFinanceSource（HK/US）
 """
 from __future__ import annotations
 import os
@@ -381,16 +384,132 @@ class TushareSource(DataSource):
 
 
 # ---------------------------------------------------------------------------
+# YFinance 源（HK / US，全球可用）
+# ---------------------------------------------------------------------------
+
+class YFinanceSource(DataSource):
+    """Yahoo Finance：HK/US 行情，无需 token，全球可访问。"""
+    name = "yfinance"
+
+    def __init__(self):
+        import yfinance as yf
+        self._yf = yf
+
+    @staticmethod
+    def _symbol(code: str, market: str) -> str:
+        """把内部代码转成 yfinance ticker。"""
+        if market == "HK":
+            return f"{code.zfill(4)}.HK"   # 06082 → 06082.HK
+        if market == "A":
+            # 6/9 开头 → 上交所，其余 → 深交所
+            return f"{code}.SS" if code[0] in ("6", "9") else f"{code}.SZ"
+        return code  # US 直接用 ticker
+
+    def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
+        sym = self._symbol(code, market)
+        # 多取 1.6 倍日历日以覆盖非交易日
+        period_days = max(int(days * 1.6), 30)
+        try:
+            hist = self._yf.Ticker(sym).history(period=f"{period_days}d")
+            if hist.empty:
+                return []
+            return hist["Close"].astype(float).tolist()[-days:]
+        except Exception as e:
+            print(f"[yfinance] get_daily {sym}: {e}")
+            return []
+
+    def get_quote(self, code: str, market: str) -> Optional[Quote]:
+        sym = self._symbol(code, market)
+        try:
+            hist = self._yf.Ticker(sym).history(period="5d")
+            if hist.empty:
+                return None
+            price    = float(hist["Close"].iloc[-1])
+            pct_chg  = 0.0
+            if len(hist) >= 2:
+                prev  = float(hist["Close"].iloc[-2])
+                pct_chg = (price - prev) / prev * 100 if prev else 0.0
+            volume   = float(hist["Volume"].iloc[-1]) if "Volume" in hist.columns else 0.0
+            # 尝试从 info 获取名称和市值（可选，失败则跳过）
+            name, market_cap = "", 0.0
+            try:
+                info = self._yf.Ticker(sym).info
+                name       = info.get("shortName") or info.get("longName") or ""
+                market_cap = float(info.get("marketCap") or 0)
+            except Exception:
+                pass
+            return Quote(code=code, name=name, price=price,
+                         pct_change=pct_chg, amount=volume, market_cap=market_cap)
+        except Exception as e:
+            print(f"[yfinance] get_quote {sym}: {e}")
+            return None
+
+
+# ---------------------------------------------------------------------------
+# 混合源：A 股用 AKShare/Tushare，HK/US 用 yfinance
+# ---------------------------------------------------------------------------
+
+class HybridSource(DataSource):
+    """A 股走 a_src，HK/US 走 yfinance。自动路由。"""
+    name = "hybrid"
+
+    def __init__(self, a_src: DataSource):
+        self._a   = a_src
+        self._yf  = None
+
+    def _yf_src(self) -> YFinanceSource:
+        if self._yf is None:
+            self._yf = YFinanceSource()
+        return self._yf
+
+    def _route(self, market: str) -> DataSource:
+        return self._a if market == "A" else self._yf_src()
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return f"hybrid({self._a.name}+yfinance)"
+
+    def get_daily(self, code, market, days=120):
+        return self._route(market).get_daily(code, market, days)
+
+    def get_quote(self, code, market):
+        return self._route(market).get_quote(code, market)
+
+    def get_financials(self, code, market):
+        return self._a.get_financials(code, market)
+
+    def get_pe_percentile(self, code, market, years=3):
+        return self._a.get_pe_percentile(code, market, years)
+
+
+# ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
 
 def get_source() -> DataSource:
-    """根据环境变量自动选择数据源。无 token → AKShare-only。"""
+    """
+    优先级：
+      有 TUSHARE_TOKEN → HybridSource(TushareSource, YFinanceSource)
+      有 yfinance      → HybridSource(AKShareSource, YFinanceSource)
+      否则            → AKShareSource（降级）
+    """
     from config import TUSHARE_TOKEN_ENV
+
+    # A 股源
     token = os.environ.get(TUSHARE_TOKEN_ENV, "").strip()
     if token:
         try:
-            return TushareSource(token)
+            a_src = TushareSource(token)
         except Exception as e:
             print(f"[data_source] Tushare 初始化失败，降级 AKShare：{e}")
-    return AKShareSource()
+            a_src = AKShareSource()
+    else:
+        a_src = AKShareSource()
+
+    # 尝试构建混合源（需要 yfinance 已安装）
+    try:
+        import yfinance  # noqa: F401
+        return HybridSource(a_src)
+    except ImportError:
+        print("[data_source] yfinance 未安装，HK/US 数据降级 AKShare。pip install yfinance")
+        return a_src

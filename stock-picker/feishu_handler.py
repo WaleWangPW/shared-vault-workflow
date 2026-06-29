@@ -146,10 +146,18 @@ def _handle_text(text: str, client, chat_id: str) -> Optional[str]:
     from data_source import get_source
     from buy_point import calculate_buy_point
 
-    parts = text.strip().split()
+    # 去掉飞书 @mention 占位符（如 @_user_1）
+    import re as _re
+    clean = _re.sub(r'@_\S+', '', text).strip()
+    parts = clean.split()
     if not parts:
         return None
     cmd = parts[0]
+
+    # 兼容不带空格：选股US / 选股HK / 选股A → 选股 US / HK / A
+    if cmd.startswith("选股") and len(cmd) > 2:
+        parts = ["选股", cmd[2:]] + parts[1:]
+        cmd = "选股"
 
     # ── 帮助 ──────────────────────────────────────────────────────────────────
     if cmd in ("帮助", "help", "？", "?"):

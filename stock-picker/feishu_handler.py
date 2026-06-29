@@ -39,6 +39,29 @@ from __future__ import annotations
 import os, sys, json, datetime as dt
 from typing import Optional
 
+# ── 加载 .env ─────────────────────────────────────────────────────────────────
+def _load_dotenv():
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    env_path = os.path.join(_dir, ".env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+_load_dotenv()
+
 # ── 环境变量 ──────────────────────────────────────────────────────────────────
 APP_ID     = os.environ.get("FEISHU_APP_ID", "").strip()
 APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "").strip()

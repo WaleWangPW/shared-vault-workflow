@@ -410,8 +410,8 @@ class YFinanceSource(DataSource):
     def _symbol(code: str, market: str) -> str:
         """把内部代码转成 yfinance ticker。"""
         if market == "HK":
-            # Yahoo Finance 去掉前导零：09992 → 9992.HK，00241 → 241.HK
-            return f"{int(code)}.HK"
+            # Yahoo Finance 最少 4 位：09992 → 9992.HK，00241 → 0241.HK
+            return f"{int(code):04d}.HK"
         if market == "A":
             # 6/9 开头 → 上交所(.SS)，其余 → 深交所(.SZ)
             return f"{code}.SS" if code[0] in ("6", "9") else f"{code}.SZ"

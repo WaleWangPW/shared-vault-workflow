@@ -39,6 +39,10 @@ class Financials:
     eps_ttm: Optional[float] = None              # 每股收益 TTM
     forward_pe: Optional[float] = None
     peg: Optional[float] = None
+    # 质量因子（Tushare 模式下填充）
+    net_profit: Optional[float] = None           # 归母净利润，最新季（元）
+    roe_series: List[float] = field(default_factory=list)  # 近4季ROE（小数，oldest→newest）
+    core_profit_ratio: Optional[float] = None    # 扣非净利/归母净利（0~1，剔除非经常性损益）
 
 
 class DataSource:
@@ -275,7 +279,7 @@ class TushareSource(DataSource):
         ts_code = self._to_ts_code(code, market)
 
         # ── 1. 营收 / 净利润同比（income 接口，取 8 季对比）──────────────
-        revenue_growth_yoy = profit_growth_yoy = None
+        revenue_growth_yoy = profit_growth_yoy = net_profit = None
         try:
             inc = self.pro.income(
                 ts_code=ts_code,
@@ -286,6 +290,12 @@ class TushareSource(DataSource):
                 inc = (inc.drop_duplicates("end_date")
                           .sort_values("end_date", ascending=False)
                           .reset_index(drop=True))
+                raw_np = inc.at[0, "n_income_attr_p"]
+                if raw_np is not None:
+                    try:
+                        net_profit = float(raw_np)
+                    except Exception:
+                        pass
                 if len(inc) >= 5:
                     def _yoy(col: str) -> Optional[float]:
                         now = float(inc.at[0, col] or 0)
@@ -296,13 +306,14 @@ class TushareSource(DataSource):
         except Exception as e:
             print(f"[tushare] income {code}: {e}")
 
-        # ── 2. 毛利率序列 / 研发占比 / EPS（fina_indicator 接口）─────────
+        # ── 2. 毛利率序列 / 研发占比 / EPS / ROE / 扣非净利（fina_indicator 接口）──
         gross_margin_series: List[float] = []
-        rd_ratio = eps_ttm = None
+        rd_ratio = eps_ttm = core_profit_ratio = None
+        roe_series: List[float] = []
         try:
             fina = self.pro.fina_indicator(
                 ts_code=ts_code,
-                fields="ts_code,end_date,grossprofit_margin,rd_exp,total_revenue,eps",
+                fields="ts_code,end_date,grossprofit_margin,rd_exp,total_revenue,eps,roe,profit_dedt",
                 limit=8,
             )
             if fina is not None and not fina.empty:
@@ -313,6 +324,10 @@ class TushareSource(DataSource):
                 # 近 4 季毛利率，oldest→newest，转小数
                 gm_vals = fina["grossprofit_margin"].dropna().head(4).astype(float).tolist()
                 gross_margin_series = [g / 100.0 for g in reversed(gm_vals)]
+
+                # ROE 序列（小数，oldest→newest）
+                roe_vals = fina["roe"].dropna().head(4).astype(float).tolist()
+                roe_series = [r / 100.0 for r in reversed(roe_vals)]
 
                 row0 = fina.iloc[0]
                 rd = row0.get("rd_exp")
@@ -326,6 +341,16 @@ class TushareSource(DataSource):
                     eps_ttm = sum(eps_vals)
                 elif eps_vals:
                     eps_ttm = eps_vals[0]
+
+                # 扣非净利/归母净利比（核心利润质量）
+                profit_dedt_raw = row0.get("profit_dedt")
+                if (profit_dedt_raw is not None and net_profit is not None
+                        and net_profit != 0):
+                    try:
+                        core_profit_ratio = float(profit_dedt_raw) / abs(net_profit)
+                        core_profit_ratio = max(0.0, min(core_profit_ratio, 1.0))
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[tushare] fina_indicator {code}: {e}")
 
@@ -351,6 +376,9 @@ class TushareSource(DataSource):
             operating_cashflow=operating_cashflow,
             rd_ratio=rd_ratio,
             eps_ttm=eps_ttm,
+            net_profit=net_profit,
+            roe_series=roe_series,
+            core_profit_ratio=core_profit_ratio,
         )
 
     def get_pe_percentile(self, code: str, market: str, years: int = 3) -> Optional[float]:

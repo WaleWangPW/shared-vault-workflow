@@ -27,30 +27,45 @@ SCREEN = {
     "market_cap_max": 5000e8,    # 5000 亿
     "daily_amount_min": 5000e4,  # 日均成交额 5000 万
     "revenue_growth_yoy_min": 0.30,   # 营收同比 >30%
-    "profit_growth_yoy_min": 0.50,    # 净利润同比 >50%
+    "profit_growth_yoy_min": 0.35,    # 净利润同比 >35%（原50%过严，会漏高质量公司）
     "forward_pe_max": 30,             # 预期 PE < 30
     "peg_max": 1.0,
     "ps_max": 10,
     "operating_cashflow_positive": True,
+    # ── 质量安全门（新增）──────────────────────────────
+    "exclude_st": True,               # 自动排除 ST / *ST 风险警示股
+    "ocf_ni_ratio_min": 0.5,          # OCF/净利润 < 0.5 → 排除（严重现金流造假信号）
+    "core_profit_ratio_min": 0.5,     # 扣非净利/净利 < 50% → 排除（严重依赖非经常性收益）
 }
 
 # ---------------- 第二层：隐形股票加分权重 ----------------
 SCORE_WEIGHTS = {
+    # 原有因子
     "ps_lt5_rev_gt100": 15,      # PS<5 且营收增速>100%
     "rd_ratio_gt15": 5,          # 研发占比 >15%
     "gross_margin_3q_up": 10,    # 毛利率连续3季提升
-    "ocf_improving": 10,         # 经营现金流大幅改善
+    "ocf_improving": 10,         # 经营现金流大幅改善（外部信号）
     "new_institution_survey": 10,# 近3月新增机构调研
     "insider_buying": 15,        # 高管/大股东增持
     "analyst_coverage_0to1": 10, # 分析师覆盖 0→1
     "industry_uptrend": 5,       # 行业景气度上升
+    # 质量因子（新增）
+    "roe_trend_up_3q": 10,       # ROE 连续3季提升（趋势向好）
+    "roe_gt15": 8,               # ROE > 15%（盈利能力强）
+    "ocf_ni_gt12": 8,            # OCF/净利润 > 1.2（利润含金量高）
+    "core_profit_high": 5,       # 扣非/净利 > 90%（利润来自主业）
 }
 
 # ---------------- 降权护栏（"澜起教训"：过度定价就扣分）----------------
 PENALTY = {
+    # 原有护栏
     "pe_percentile_gt80": -20,   # PE 处历史 >80% 分位
     "pe_percentile_gt90": -15,   # >90% 分位再叠加（合计 -35）
     "price_1y_gt300pct": -10,    # 近一年涨幅 >300%
+    # 质量风险扣分（新增）
+    "ocf_ni_lt08": -15,          # OCF/净利润 < 0.8（现金流质量差，潜在利润水分）
+    "core_profit_lt07": -10,     # 扣非/净利 < 70%（依赖补贴/资产出售维持利润）
+    "price_1y_gt200pct": -5,     # 近一年涨幅 >200% 预警（<300% 的宽松档）
 }
 
 # ---------------- 市场分层 ----------------

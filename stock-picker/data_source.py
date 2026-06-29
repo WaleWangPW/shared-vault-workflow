@@ -394,55 +394,65 @@ class YFinanceSource(DataSource):
     def __init__(self):
         import yfinance as yf
         self._yf = yf
+        self._tickers: dict = {}                   # sym → yf.Ticker（同进程复用）
+        self._hist: dict = {}                       # sym → (datetime, DataFrame)
 
     @staticmethod
     def _symbol(code: str, market: str) -> str:
         """把内部代码转成 yfinance ticker。"""
         if market == "HK":
-            return f"{code.zfill(4)}.HK"   # 06082 → 06082.HK
+            # Yahoo Finance 去掉前导零：09992 → 9992.HK，00241 → 241.HK
+            return f"{int(code)}.HK"
         if market == "A":
-            # 6/9 开头 → 上交所，其余 → 深交所
+            # 6/9 开头 → 上交所(.SS)，其余 → 深交所(.SZ)
             return f"{code}.SS" if code[0] in ("6", "9") else f"{code}.SZ"
         return code  # US 直接用 ticker
 
-    def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
-        sym = self._symbol(code, market)
-        # 多取 1.6 倍日历日以覆盖非交易日
+    def _ticker(self, sym: str):
+        if sym not in self._tickers:
+            self._tickers[sym] = self._yf.Ticker(sym)
+        return self._tickers[sym]
+
+    def _fetch_hist(self, sym: str, days: int) -> pd.DataFrame:
+        """带 5 分钟 TTL 的历史数据缓存，避免同一进程重复 HTTP 请求。"""
+        cached = self._hist.get(sym)
+        if cached:
+            ts, df = cached
+            if (dt.datetime.now() - ts).total_seconds() < 300 and len(df) >= days:
+                return df
         period_days = max(int(days * 1.6), 30)
         try:
-            hist = self._yf.Ticker(sym).history(period=f"{period_days}d")
-            if hist.empty:
-                return []
-            return hist["Close"].astype(float).tolist()[-days:]
+            df = self._ticker(sym).history(period=f"{period_days}d")
         except Exception as e:
-            print(f"[yfinance] get_daily {sym}: {e}")
+            print(f"[yfinance] history {sym}: {e}")
+            df = pd.DataFrame()
+        self._hist[sym] = (dt.datetime.now(), df)
+        return df
+
+    def get_daily(self, code: str, market: str, days: int = 120) -> List[float]:
+        sym = self._symbol(code, market)
+        df = self._fetch_hist(sym, days)
+        if df.empty:
             return []
+        return df["Close"].astype(float).tolist()[-days:]
 
     def get_quote(self, code: str, market: str) -> Optional[Quote]:
         sym = self._symbol(code, market)
-        try:
-            hist = self._yf.Ticker(sym).history(period="5d")
-            if hist.empty:
-                return None
-            price    = float(hist["Close"].iloc[-1])
-            pct_chg  = 0.0
-            if len(hist) >= 2:
-                prev  = float(hist["Close"].iloc[-2])
-                pct_chg = (price - prev) / prev * 100 if prev else 0.0
-            volume   = float(hist["Volume"].iloc[-1]) if "Volume" in hist.columns else 0.0
-            # 尝试从 info 获取名称和市值（可选，失败则跳过）
-            name, market_cap = "", 0.0
-            try:
-                info = self._yf.Ticker(sym).info
-                name       = info.get("shortName") or info.get("longName") or ""
-                market_cap = float(info.get("marketCap") or 0)
-            except Exception:
-                pass
-            return Quote(code=code, name=name, price=price,
-                         pct_change=pct_chg, amount=volume, market_cap=market_cap)
-        except Exception as e:
-            print(f"[yfinance] get_quote {sym}: {e}")
+        # 优先复用已缓存的历史（分析时 get_daily 先调用，缓存已足够）
+        cached = self._hist.get(sym)
+        if cached and (dt.datetime.now() - cached[0]).total_seconds() < 300 and not cached[1].empty:
+            df = cached[1]
+        else:
+            df = self._fetch_hist(sym, 5)
+        if df.empty:
             return None
+        price   = float(df["Close"].iloc[-1])
+        pct_chg = 0.0
+        if len(df) >= 2:
+            prev    = float(df["Close"].iloc[-2])
+            pct_chg = (price - prev) / prev * 100 if prev else 0.0
+        volume = float(df["Volume"].iloc[-1]) if "Volume" in df.columns else 0.0
+        return Quote(code=code, price=price, pct_change=pct_chg, amount=volume)
 
 
 # ---------------------------------------------------------------------------
@@ -470,10 +480,24 @@ class HybridSource(DataSource):
         return f"hybrid({self._a.name}+yfinance)"
 
     def get_daily(self, code, market, days=120):
-        return self._route(market).get_daily(code, market, days)
+        result = self._route(market).get_daily(code, market, days)
+        # A 股 AKShare 失败时降级 yfinance
+        if not result and market == "A":
+            try:
+                result = self._yf_src().get_daily(code, market, days)
+            except Exception:
+                pass
+        return result
 
     def get_quote(self, code, market):
-        return self._route(market).get_quote(code, market)
+        result = self._route(market).get_quote(code, market)
+        # A 股 AKShare 失败时降级 yfinance
+        if result is None and market == "A":
+            try:
+                result = self._yf_src().get_quote(code, market)
+            except Exception:
+                pass
+        return result
 
     def get_financials(self, code, market):
         return self._a.get_financials(code, market)

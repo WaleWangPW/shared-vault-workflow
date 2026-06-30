@@ -171,11 +171,13 @@ def screen_a(top_n: int = 10, deep_n: int = 40, sector_kw: str = "") -> str:
 
     # 名称 + 行业过滤
     name_map: Dict[str, str] = {}
+    industry_map: Dict[str, str] = {}
     try:
         si = pro.stock_basic(exchange="", list_status="L",
                              fields="ts_code,name,industry")
         if si is not None and not si.empty:
             name_map = dict(zip(si.ts_code, si.name))
+            industry_map = dict(zip(si.ts_code, si.industry.fillna("")))
             if sector_kw:
                 sector_codes = set(
                     si[si.industry.str.contains(sector_kw, na=False)].ts_code
@@ -237,6 +239,7 @@ def screen_a(top_n: int = 10, deep_n: int = 40, sector_kw: str = "") -> str:
                 "basic_reasons": basic.get("reasons", []),
                 "skipped": basic.get("skipped", []),
                 "buy": bp, "price_1y_pct": price_1y_pct,
+                "description": industry_map.get(ts_code, ""),
             })
             if idx % 10 == 0:
                 print(f"[选股A] 进度 {idx}/{len(candidates)}...")
@@ -451,6 +454,29 @@ def screen_us(top_n: int = 10, deep_n: int = 30) -> tuple:
 
     top, _ = _rank_and_slice(results, top_n)
     n_scanned = len(price_map)
+
+    # Enrich top results with company name and sector description
+    try:
+        import yfinance as yf
+        for r in top:
+            try:
+                info = yf.Ticker(r["code"]).info
+                long_name = info.get("longName") or info.get("shortName")
+                if long_name:
+                    r["name"] = long_name
+                sector  = info.get("sector", "")
+                summary = (info.get("longBusinessSummary") or "")[:120]
+                if sector and summary:
+                    r["description"] = f"{sector} · {summary}"
+                elif sector:
+                    r["description"] = sector
+                elif summary:
+                    r["description"] = summary
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     lines = [
         f"🇺🇸 美股选股  {today}",
         f"扫描 {n_scanned} 只 → 得分前 {len(top)} 只（纯技术面）\n",

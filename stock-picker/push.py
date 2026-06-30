@@ -6,7 +6,7 @@
   方式二：FEISHU_APP_ID + FEISHU_APP_SECRET + FEISHU_CHAT_ID（飞书应用）
 """
 from __future__ import annotations
-import os, json, urllib.request
+import os, json, urllib.request, urllib.error
 from typing import Dict, List, Optional
 from config import PUSH
 
@@ -40,8 +40,15 @@ def _http_post(url: str, payload: dict, headers: dict) -> Dict:
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             return {"ok": True, "resp": r.read().decode("utf-8")}
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8")
+        except Exception:
+            pass
+        return {"ok": False, "reason": f"HTTP {e.code} {e.reason}", "resp": err_body}
     except Exception as e:
-        return {"ok": False, "reason": repr(e)}
+        return {"ok": False, "reason": repr(e), "resp": ""}
 
 
 def _get_tenant_token(app_id: str, app_secret: str) -> Optional[str]:
@@ -74,7 +81,12 @@ def _send_via_app(text: str, app_id: str, app_secret: str, chat_id: str) -> Dict
          "content": json.dumps({"text": text})},
         {"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
-    return {"sent": r["ok"], **({"resp": r["resp"]} if r["ok"] else {"reason": r["reason"]})}
+    if r["ok"]:
+        return {"sent": True, "resp": r["resp"]}
+    reason = r.get("reason", "未知错误")
+    resp   = r.get("resp", "")
+    print(f"[push] send失败 id_type={id_type} receive_id={chat_id!r}: {reason} | API: {resp}")
+    return {"sent": False, "reason": reason, "resp": resp}
 
 
 def send_feishu_card(card: dict, chat_id: str = None) -> Dict:

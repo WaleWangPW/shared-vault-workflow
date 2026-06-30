@@ -418,8 +418,13 @@ def _make_card_handler(client):
                     _reply(client, chat_id,
                            f"📰 已向 AI资讯助手 发送 {name} 的信息查询请求，请稍候查看回复")
                 else:
+                    reason = r.get("reason", "未知")
+                    resp   = r.get("resp", "")
+                    print(f"[card_action] newsagent 发送失败: {reason} | API响应: {resp}")
                     _reply(client, chat_id,
-                           f"⚠️ 发送失败，请检查 NEWSAGENT_CHAT_ID 配置")
+                           f"⚠️ newsagent 发送失败（{reason}）\n"
+                           f"API 响应: {resp[:200] if resp else '无'}\n"
+                           f"请检查 NEWSAGENT_CHAT_ID 及应用的消息发送权限")
 
         except Exception as e:
             print(f"[card_action] 处理出错: {e}")

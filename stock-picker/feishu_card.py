@@ -57,6 +57,11 @@ def build_screen_card(market: str, results: List[Dict],
             f"  {cur}{r['price']:.2f}{pct_s}{pe_s}{y1_s}"
             f"  得分**{r['score']:+d}**"
         ]
+        if r.get("description"):
+            desc = r["description"]
+            if len(desc) > 110:
+                desc = desc[:107] + "..."
+            lines.append(f"📝 {desc}")
         if r.get("hits"):
             lines.append("✦ " + " | ".join(r["hits"]))
         if r.get("basic_reasons"):

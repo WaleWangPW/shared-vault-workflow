@@ -127,13 +127,32 @@ def build_screen_card(market: str, results: List[Dict],
 
 
 def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) -> Dict:
-    """将 run_daily 的选股结果构建为飞书卡片（Markdown 表格）。"""
+    """将 run_daily 的选股结果构建为飞书卡片（column_set 真实多列布局）。"""
 
-    # 候选表格
-    rows = [
-        "| # | 名称 | 代码 | 市场 | 现价 | 买点 | 止损 | 得分 |",
-        "|:---:|:------|:------:|:----:|-----:|-----:|-----:|:---:|",
+    def _row(cells, weights):
+        """生成一行 column_set，每格为 lark_md。"""
+        return {
+            "tag": "column_set",
+            "flex_mode": "none",
+            "columns": [
+                {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": w,
+                    "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": txt}}],
+                }
+                for txt, w in zip(cells, weights)
+            ],
+        }
+
+    # 候选区
+    C_W = [1, 5, 4, 1]   # 序 | 名称/代码/市场 | 价格组 | 得分
+    elements: List[Dict] = [
+        {"tag": "markdown", "content": f"**🎯 候选（{len(candidates)} 只）**"},
+        _row(["**序**", "**名称（代码）市场**", "**现价 / 买点 / 止损**", "**分**"], C_W),
+        {"tag": "hr"},
     ]
+
     for i, c in enumerate(candidates, 1):
         bp  = c.get("buy") or {}
         cur = bp.get("current", "-")
@@ -142,47 +161,50 @@ def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) ->
         if isinstance(cur, float): cur = f"{cur:.2f}"
         if isinstance(bpt, float): bpt = f"{bpt:.2f}"
         if isinstance(stp, float): stp = f"{stp:.2f}"
-        rows.append(
-            f"| {i} | {c['name']} | {c['code']} | {c.get('market','-')} "
-            f"| {cur} | {bpt} | {stp} | {c.get('score', 0):+d} |"
-        )
-    candidate_table = "\n".join(rows)
+        flag = "✅" if c.get("basic_pass") else "⬜"
+        score = c.get("score", 0)
+        elements.append(_row([
+            str(i),
+            f"{flag} **{c['name']}**\n{c['code']}  [{c.get('market', '-')}]",
+            f"现价 **{cur}**\n买点 {bpt}  止损 {stp}",
+            f"**{score:+d}**",
+        ], C_W))
 
-    # 触发信号（每只有信号才显示一行）
-    sig_lines = []
-    for c in candidates:
-        hits = c.get("hits")
-        if hits:
-            sig_lines.append(f"**{c['name']}**：" + " · ".join(hits))
-    signals_md = "\n".join(sig_lines) if sig_lines else "（无）"
+    elements.append({"tag": "hr"})
 
-    # 持仓表格
+    # 触发信号
+    sig_lines = [
+        f"**{c['name']}**：" + " · ".join(c["hits"])
+        for c in candidates if c.get("hits")
+    ]
+    elements.append({
+        "tag": "markdown",
+        "content": "**✦ 触发信号**\n\n" + ("\n".join(sig_lines) if sig_lines else "（无）"),
+    })
+    elements.append({"tag": "hr"})
+
+    # 持仓区
+    elements.append({"tag": "markdown", "content": f"**📈 持仓跟踪（{len(holdings)} 只）**"})
     if holdings:
-        h_rows = [
-            "| 名称 | 代码 | 成本 | 现价 | 盈亏 |",
-            "|:-----|:----:|-----:|-----:|-----:|",
-        ]
+        H_W = [4, 2, 2, 2]
+        elements.append(_row(["**名称（代码）**", "**成本**", "**现价**", "**盈亏**"], H_W))
+        elements.append({"tag": "hr"})
         for h in holdings:
             cost  = str(h["cost"])  if h.get("cost")  else "-"
             price = str(h["price"]) if h.get("price") else "-"
             pnl   = h.get("pnl_pct") or "-"
-            h_rows.append(f"| {h['name']} | {h['code']} | {cost} | {price} | {pnl} |")
-        holdings_md = "\n".join(h_rows)
+            elements.append(_row(
+                [f"**{h['name']}**\n{h['code']}", cost, price, pnl],
+                H_W,
+            ))
     else:
-        holdings_md = "当前无持仓"
+        elements.append({"tag": "markdown", "content": "当前无持仓"})
 
-    elements = [
-        {"tag": "markdown", "content": f"**🎯 候选（{len(candidates)} 只）**\n\n{candidate_table}"},
-        {"tag": "hr"},
-        {"tag": "markdown", "content": f"**✦ 触发信号**\n\n{signals_md}"},
-        {"tag": "hr"},
-        {"tag": "markdown", "content": f"**📈 持仓跟踪（{len(holdings)} 只）**\n\n{holdings_md}"},
-        {"tag": "hr"},
-        {
-            "tag": "note",
-            "elements": [{"tag": "plain_text", "content": "⚠️ 仅供研究学习，不构成投资建议"}],
-        },
-    ]
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text", "content": "⚠️ 仅供研究学习，不构成投资建议"}],
+    })
 
     return {
         "config": {"wide_screen_mode": True},

@@ -172,14 +172,16 @@ def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) ->
 
     elements.append({"tag": "hr"})
 
-    # 触发信号
-    sig_lines = [
-        f"**{c['name']}**：" + " · ".join(c["hits"])
-        for c in candidates if c.get("hits")
-    ]
+    # 触发信号（过滤 lite 内部标记，只显示实质性信号）
+    _SKIP = {"lite:仅技术面"}
+    sig_lines = []
+    for c in candidates:
+        hits = [h for h in (c.get("hits") or []) if h not in _SKIP]
+        if hits:
+            sig_lines.append(f"**{c['name']}**：" + " · ".join(hits))
     elements.append({
         "tag": "markdown",
-        "content": "**✦ 触发信号**\n\n" + ("\n".join(sig_lines) if sig_lines else "（无）"),
+        "content": "**✦ 触发信号**\n\n" + ("\n".join(sig_lines) if sig_lines else "暂无实质信号"),
     })
     elements.append({"tag": "hr"})
 

@@ -479,10 +479,32 @@ HELP = """📋 股票助手指令
   查 <代码>                         查 688008
   日报                              立即触发选股日报
   选股 [A|HK|US|ALL] [行业]        选股 HK / 选股 US / 选股 A 半导体
+  资讯 <代码> [市场]               资讯 688008 A / 资讯 AAPL US
   诊断                              验证数据源和凭证配置
 
 HK代码支持 HK6082 或 06082 两种格式（自动转换）
 ⚠️ 仅供研究学习，不构成投资建议"""
+
+
+def cmd_zixun(args):
+    """搜索公司近期新闻，返回文本。"""
+    if not args:
+        return "格式：资讯 <代码> [市场]\n例：资讯 688008 A"
+    code = _norm(args[0])
+    market = args[1].upper() if len(args) >= 2 else "A"
+    wl = effective_watchlist(WATCHLIST)
+    item = next((w for w in wl if w["code"] == code), {})
+    name = item.get("name", code)
+    if not market and item.get("market"):
+        market = item["market"]
+    try:
+        from news_search import search_company_news, build_news_reply
+        articles = search_company_news(name, code, market, max_results=6)
+        return build_news_reply(name, code, market, articles)
+    except ImportError:
+        return "⚠️ 缺少 duckduckgo-search 包，请运行：pip install duckduckgo-search"
+    except Exception as e:
+        return f"⚠️ 搜索失败：{e}"
 
 
 def main():
@@ -495,22 +517,25 @@ def main():
     rest = args[1:]
 
     dispatch = {
-        "买入":   lambda: cmd_mairu(rest),
-        "卖出":   lambda: remove_holding(_norm(rest[0])) if rest else "格式：卖出 <代码>",
-        "持仓":   lambda: cmd_chicangs(),
-        "分析":   lambda: cmd_fenxi(),
+        "买入":    lambda: cmd_mairu(rest),
+        "卖出":    lambda: remove_holding(_norm(rest[0])) if rest else "格式：卖出 <代码>",
+        "持仓":    lambda: cmd_chicangs(),
+        "分析":    lambda: cmd_fenxi(),
         "关注列表": lambda: cmd_guanzhu_list(),
-        "关注":   lambda: cmd_guanzhu_list(),
-        "加股":   lambda: (add_to_watchlist(_norm(rest[0]), rest[1],
-                            rest[2].upper() if len(rest) >= 3 else "A")
-                           if len(rest) >= 2 else "格式：加股 <代码> <名称> [市场]"),
-        "减股":   lambda: remove_from_watchlist(_norm(rest[0])) if rest else "格式：减股 <代码>",
-        "查":     lambda: cmd_cha(rest),
-        "日报":   lambda: cmd_ribao(),
-        "选股":   lambda: cmd_xuangu(rest),
-        "诊断":   lambda: cmd_zhenduan(),
-        "帮助":   lambda: HELP,
-        "help":   lambda: HELP,
+        "关注":    lambda: cmd_guanzhu_list(),
+        "加股":    lambda: (add_to_watchlist(_norm(rest[0]), rest[1],
+                             rest[2].upper() if len(rest) >= 3 else "A")
+                            if len(rest) >= 2 else "格式：加股 <代码> <名称> [市场]"),
+        "减股":    lambda: remove_from_watchlist(_norm(rest[0])) if rest else "格式：减股 <代码>",
+        "查":      lambda: cmd_cha(rest),
+        "日报":    lambda: cmd_ribao(),
+        "选股":    lambda: cmd_xuangu(rest),
+        "资讯":    lambda: cmd_zixun(rest),
+        "新闻":    lambda: cmd_zixun(rest),
+        "动态":    lambda: cmd_zixun(rest),
+        "诊断":    lambda: cmd_zhenduan(),
+        "帮助":    lambda: HELP,
+        "help":    lambda: HELP,
     }
 
     fn = dispatch.get(cmd)

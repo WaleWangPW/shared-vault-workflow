@@ -16,4 +16,11 @@ done
 pkill -f feishu_handler.py 2>/dev/null && echo "✅ feishu_handler 进程已停止" || true
 pkill -f realtime_monitor.py 2>/dev/null && echo "✅ realtime_monitor 进程已停止" || true
 
+# 移除 openclaw stock-picker skill（如已安装）
+SKILL_DIR="$HOME/.openclaw/agents/feishu-agent/workspace/skills/stock-picker"
+if [ -d "$SKILL_DIR" ]; then
+    rm -rf "$SKILL_DIR"
+    echo "✅ openclaw stock-picker skill 已移除"
+fi
+
 echo "卸载完成"

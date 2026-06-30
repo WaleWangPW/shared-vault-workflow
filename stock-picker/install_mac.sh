@@ -76,43 +76,9 @@ mkdir -p "$LAUNCH_DIR"
 
 echo ""
 echo ">>> 配置 launchd 服务..."
+echo "  (feishu_handler 由 openclaw 统一接管，此处仅注册定时任务)"
 
-# 1. feishu_handler —— 开机自启 + 崩溃自动重启
-cat > "$LAUNCH_DIR/com.stockpicker.feishu.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.stockpicker.feishu</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$PYTHON3</string>
-        <string>-u</string>
-        <string>$STOCK_DIR/feishu_handler.py</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>$STOCK_DIR</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PYTHONUNBUFFERED</key>
-        <string>1</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>ThrottleInterval</key>
-    <integer>30</integer>
-    <key>StandardOutPath</key>
-    <string>$STOCK_DIR/logs/feishu.log</string>
-    <key>StandardErrorPath</key>
-    <string>$STOCK_DIR/logs/feishu.log</string>
-</dict>
-</plist>
-PLIST
-
-# 2. run_daily —— 工作日 08:30 自动执行
+# 1. run_daily —— 工作日 08:30 自动执行
 cat > "$LAUNCH_DIR/com.stockpicker.daily.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -187,7 +153,7 @@ cat > "$LAUNCH_DIR/com.stockpicker.monitor.plist" <<PLIST
 PLIST
 
 # ── 加载服务 ─────────────────────────────────────────────
-for label in com.stockpicker.feishu com.stockpicker.daily com.stockpicker.monitor; do
+for label in com.stockpicker.daily com.stockpicker.monitor; do
     launchctl unload "$LAUNCH_DIR/${label}.plist" 2>/dev/null || true
     launchctl load -w "$LAUNCH_DIR/${label}.plist"
     echo "  ✅ $label 已加载"
@@ -199,16 +165,18 @@ echo "=================================================="
 echo "  ✅ 安装完成！"
 echo "=================================================="
 echo ""
-echo "服务状态（应有 PID）："
+echo "服务状态："
 launchctl list | grep stockpicker | awk '{printf "  %-45s PID=%s\n", $3, $1}' || echo "  请稍候 30 秒后再查看"
 echo ""
 echo "日志查看："
-echo "  tail -f $STOCK_DIR/logs/feishu.log   # 飞书实时连接"
 echo "  tail -f $STOCK_DIR/logs/daily.log    # 每日日报"
 echo "  tail -f $STOCK_DIR/logs/monitor.log  # 盘中监控"
 echo ""
 echo "手动触发日报（测试）："
 echo "  python3 $STOCK_DIR/run_daily.py --dry-run"
+echo ""
+echo ">>> 下一步：安装 openclaw 股票技能（让 feishu-agent 处理指令）"
+echo "  bash $STOCK_DIR/install_openclaw_skill.sh"
 echo ""
 echo "停止所有服务："
 echo "  bash $STOCK_DIR/uninstall_mac.sh"

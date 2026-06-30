@@ -49,7 +49,11 @@ mkdir -p "$SKILL_DEST"
 
 cp "$STOCK_DIR/openclaw/SKILL.md" "$SKILL_DEST/SKILL.md"
 
-# 写入 STOCK_PICKER_DIR 路径，方便 openclaw 调用
+# 把 SKILL.md 中的占位路径替换为实际绝对路径（避免 Node.js 不展开 ~）
+sed -i '' "s|~/shared-vault-workflow/stock-picker|$STOCK_DIR|g" "$SKILL_DEST/SKILL.md" 2>/dev/null \
+  || sed -i "s|~/shared-vault-workflow/stock-picker|$STOCK_DIR|g" "$SKILL_DEST/SKILL.md"
+
+# 写入 STOCK_PICKER_DIR 路径，供 openclaw shell 环境使用
 cat > "$SKILL_DEST/env.sh" <<ENV
 #!/usr/bin/env bash
 # 股票助手路径（供 openclaw 执行 Python 脚本时使用）

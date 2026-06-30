@@ -44,7 +44,8 @@ from config import WATCHLIST, MAX_HOLDINGS, MARKET_DEPTH
 from data_source import get_source
 from screener import passes_basic, score_stock, rank
 from buy_point import calculate_buy_point
-from push import build_daily_text, send_feishu
+from push import build_daily_text, send_feishu, send_feishu_card
+from feishu_card import build_daily_card
 from holdings_store import load_holdings, effective_watchlist
 
 
@@ -144,7 +145,13 @@ def run(dry_run: bool = False):
     if dry_run:
         print("[run_daily] --dry-run，未推送")
     else:
-        print("[run_daily] 推送结果:", send_feishu(text))
+        card = build_daily_card(today, top, holdings_view)
+        r = send_feishu_card(card)
+        if r.get("sent"):
+            print("[run_daily] 卡片推送成功")
+        else:
+            print(f"[run_daily] 卡片推送失败({r})，降级文本推送")
+            print("[run_daily] 推送结果:", send_feishu(text))
 
 
 if __name__ == "__main__":

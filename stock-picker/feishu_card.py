@@ -126,6 +126,74 @@ def build_screen_card(market: str, results: List[Dict],
     }
 
 
+def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) -> Dict:
+    """将 run_daily 的选股结果构建为飞书卡片（Markdown 表格）。"""
+
+    # 候选表格
+    rows = [
+        "| # | 名称 | 代码 | 市场 | 现价 | 买点 | 止损 | 得分 |",
+        "|:---:|:------|:------:|:----:|-----:|-----:|-----:|:---:|",
+    ]
+    for i, c in enumerate(candidates, 1):
+        bp  = c.get("buy") or {}
+        cur = bp.get("current", "-")
+        bpt = bp.get("buy_point", "-")
+        stp = bp.get("stop_loss", "-")
+        if isinstance(cur, float): cur = f"{cur:.2f}"
+        if isinstance(bpt, float): bpt = f"{bpt:.2f}"
+        if isinstance(stp, float): stp = f"{stp:.2f}"
+        rows.append(
+            f"| {i} | {c['name']} | {c['code']} | {c.get('market','-')} "
+            f"| {cur} | {bpt} | {stp} | {c.get('score', 0):+d} |"
+        )
+    candidate_table = "\n".join(rows)
+
+    # 触发信号（每只有信号才显示一行）
+    sig_lines = []
+    for c in candidates:
+        hits = c.get("hits")
+        if hits:
+            sig_lines.append(f"**{c['name']}**：" + " · ".join(hits))
+    signals_md = "\n".join(sig_lines) if sig_lines else "（无）"
+
+    # 持仓表格
+    if holdings:
+        h_rows = [
+            "| 名称 | 代码 | 成本 | 现价 | 盈亏 |",
+            "|:-----|:----:|-----:|-----:|-----:|",
+        ]
+        for h in holdings:
+            cost  = str(h["cost"])  if h.get("cost")  else "-"
+            price = str(h["price"]) if h.get("price") else "-"
+            pnl   = h.get("pnl_pct") or "-"
+            h_rows.append(f"| {h['name']} | {h['code']} | {cost} | {price} | {pnl} |")
+        holdings_md = "\n".join(h_rows)
+    else:
+        holdings_md = "当前无持仓"
+
+    elements = [
+        {"tag": "markdown", "content": f"**🎯 候选（{len(candidates)} 只）**\n\n{candidate_table}"},
+        {"tag": "hr"},
+        {"tag": "markdown", "content": f"**✦ 触发信号**\n\n{signals_md}"},
+        {"tag": "hr"},
+        {"tag": "markdown", "content": f"**📈 持仓跟踪（{len(holdings)} 只）**\n\n{holdings_md}"},
+        {"tag": "hr"},
+        {
+            "tag": "note",
+            "elements": [{"tag": "plain_text", "content": "⚠️ 仅供研究学习，不构成投资建议"}],
+        },
+    ]
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"📊 选股日报 · {date}"},
+            "template": "blue",
+        },
+        "elements": elements,
+    }
+
+
 def build_watchlist_confirm_card(code: str, name: str, market: str) -> Dict:
     """点击「加入关注」后发回的确认卡片。"""
     mkt_label = _MKT.get(market, {}).get("label", market)

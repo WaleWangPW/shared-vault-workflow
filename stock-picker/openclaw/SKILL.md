@@ -1,91 +1,41 @@
 ---
 name: stock-picker
-description: >
-  股票助手技能 —— 处理选股、持仓、买点分析、公司动态等所有股票相关指令。
-  通过调用本地 Python 脚本（cmd.py）实现，支持 A股 / 港股 / 美股。
-  当用户发送股票相关指令时自动激活。
-triggers:
-  - 买入
-  - 卖出
-  - 持仓
-  - 分析
-  - 加股
-  - 减股
-  - 关注列表
-  - 关注
-  - 查
-  - 日报
-  - 选股
-  - 诊断
-  - 帮助
-  - 资讯
-  - 新闻
-  - 动态
+description: Use this skill when the user sends any stock-related command in Chinese or English: 买入/卖出/持仓/分析/加股/减股/关注列表/查/日报/选股/资讯/新闻/动态/诊断/帮助. Runs local Python scripts to manage a personal stock watchlist, calculate buy points, screen A/HK/US stocks, and search company news. All data stays local; no cloud APIs required beyond market data providers.
 ---
 
-# 股票助手技能
+# Stock Picker Skill
 
-你是一个股票研究助手，所有股票操作通过调用本机 Python 脚本完成。
+本地股票助手，通过调用 Python 脚本处理选股、持仓、买点分析、公司动态等操作。
 
-## 工具路径
+## 调用方式
 
-脚本目录由环境变量 `STOCK_PICKER_DIR` 指定。如未设置，默认路径为 `~/shared-vault-workflow/stock-picker`（Mac Mini 上的实际路径以安装时为准）。
-
-## 核心调用规则
-
-**收到股票相关消息时，用 shell 执行以下命令，将输出直接回复给用户：**
-
-```
-python3 $STOCK_PICKER_DIR/cmd.py <指令> [参数...]
+```bash
+bash <skill>/scripts/stock.sh <指令> [参数...]
 ```
 
-## 指令映射表
+将脚本的 stdout 直接作为飞书文本消息回复用户，不要加额外解释。
 
-| 用户消息示例 | 调用命令 |
+## 指令映射
+
+| 用户发送 | 调用命令 |
 |---|---|
-| `买入 688008 260 100` | `python3 cmd.py 买入 688008 260 100` |
-| `卖出 688008` | `python3 cmd.py 卖出 688008` |
-| `持仓` | `python3 cmd.py 持仓` |
-| `分析` | `python3 cmd.py 分析` |
-| `加股 600036 招商银行 A` | `python3 cmd.py 加股 600036 招商银行 A` |
-| `减股 688008` | `python3 cmd.py 减股 688008` |
-| `关注列表` / `关注` | `python3 cmd.py 关注列表` |
-| `查 688008` | `python3 cmd.py 查 688008` |
-| `日报` | `python3 cmd.py 日报` |
-| `选股` / `选股 HK` / `选股 A 半导体` | `python3 cmd.py 选股 [市场] [行业]` |
-| `诊断` | `python3 cmd.py 诊断` |
-| `帮助` / `help` | `python3 cmd.py 帮助` |
+| `帮助` / `stock help` | `bash <skill>/scripts/stock.sh 帮助` |
+| `买入 688008 260 100` | `bash <skill>/scripts/stock.sh 买入 688008 260 100` |
+| `卖出 688008` | `bash <skill>/scripts/stock.sh 卖出 688008` |
+| `持仓` | `bash <skill>/scripts/stock.sh 持仓` |
+| `分析` | `bash <skill>/scripts/stock.sh 分析` |
+| `加股 600036 招商银行 A` | `bash <skill>/scripts/stock.sh 加股 600036 招商银行 A` |
+| `减股 688008` | `bash <skill>/scripts/stock.sh 减股 688008` |
+| `关注列表` / `关注` | `bash <skill>/scripts/stock.sh 关注列表` |
+| `查 688008` | `bash <skill>/scripts/stock.sh 查 688008` |
+| `日报` | `bash <skill>/scripts/stock.sh 日报` |
+| `选股` / `选股 HK` / `选股 A 半导体` | `bash <skill>/scripts/stock.sh 选股 [市场] [行业]` |
+| `资讯 688008` / `新闻 AAPL US` | `bash <skill>/scripts/stock.sh 资讯 <代码> [市场]` |
+| `诊断` | `bash <skill>/scripts/stock.sh 诊断` |
 
-### 资讯 / 新闻 / 动态
+## 注意事项
 
-用户发送 `资讯 <代码>` / `新闻 <代码>` / `<名称>动态` 时，调用：
-
-```
-python3 $STOCK_PICKER_DIR/cmd.py 资讯 <代码> [市场]
-```
-
-如 `cmd.py` 不支持资讯子命令，则调用：
-
-```
-python3 -c "
-import sys; sys.path.insert(0,'$STOCK_PICKER_DIR')
-from news_search import search_company_news, build_news_reply
-arts = search_company_news('<名称>', '<代码>', '<市场>', 6)
-print(build_news_reply('<名称>', '<代码>', '<市场>', arts))
-"
-```
-
-## 环境变量
-
-执行 Python 脚本时需要的环境变量在 `$STOCK_PICKER_DIR/.env` 文件中，脚本自动加载，无需手动传入。
-
-## 输出规则
-
-- 直接将脚本 stdout 作为飞书文本消息回复用户
-- 不要加额外解释或包装
-- 脚本超时（>60 秒）时回复：「⏳ 正在处理，请稍候」
-- 脚本报错时回复：「⚠️ 执行失败：<错误摘要>」
-
-## 免责声明
-
-所有分析仅供研究学习，不构成投资建议。
+- HK 代码支持 `HK6082` 或 `06082` 两种格式（脚本自动转换）
+- 脚本超时（>60 秒）时先回复「⏳ 正在处理，请稍候...」
+- 脚本出错时回复 stderr 的前两行
+- 所有分析仅供研究学习，不构成投资建议

@@ -218,6 +218,56 @@ def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) ->
     }
 
 
+def build_news_card(name: str, code: str, market: str, articles: list) -> Dict:
+    """将搜索结果构建为飞书新闻卡片。"""
+    mkt_cfg = _MKT.get(market.upper(), {"flag": "🌐", "label": market, "tpl": "grey"})
+    import datetime as _dt
+    today = _dt.date.today().strftime("%Y-%m-%d")
+
+    elements: list = []
+
+    if not articles:
+        elements.append({
+            "tag": "markdown",
+            "content": "未找到近期相关新闻，请稍后重试。",
+        })
+    else:
+        for a in articles:
+            title  = a.get("title", "（无标题）")
+            source = a.get("source", "")
+            url    = a.get("url", "")
+            date   = (a.get("date") or "")[:10]
+            body   = (a.get("body") or "")[:120]
+
+            meta = " · ".join(filter(None, [date, source]))
+            content = f"**{title}**"
+            if meta:
+                content += f"\n{meta}"
+            if body:
+                content += f"\n{body}..."
+            if url:
+                content += f"\n[阅读全文]({url})"
+
+            elements.append({"tag": "markdown", "content": content})
+            elements.append({"tag": "hr"})
+
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text",
+                      "content": "⚠️ 内容来自网络搜索，仅供参考，请自行核实"}],
+    })
+
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text",
+                      "content": f"{mkt_cfg['flag']} {name}（{code}）公司动态  {today}"},
+            "template": mkt_cfg["tpl"],
+        },
+        "elements": elements,
+    }
+
+
 def build_watchlist_confirm_card(code: str, name: str, market: str) -> Dict:
     """点击「加入关注」后发回的确认卡片。"""
     mkt_label = _MKT.get(market, {}).get("label", market)

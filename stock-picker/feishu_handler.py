@@ -90,10 +90,10 @@ HELP_TEXT = """📋 股票助手指令手册
   选股 A 半导体  → A股行业过滤
 
 【即时查询】
-  查 <代码>   → 当前价/买点/止损
-    例：查 688008
-  日报   → 立即生成选股日报
-  帮助   → 显示本列表
+  查 <代码>      → 当前价/买点/止损，例：查 688008
+  资讯 <代码>   → 联网搜索公司近期新闻，例：资讯 NVDA
+  日报           → 立即生成选股日报
+  帮助           → 显示本列表
 
 ⚠️ 仅供研究学习，不构成投资建议。"""
 
@@ -282,6 +282,18 @@ def _handle_text(text: str, client, chat_id: str) -> Optional[str]:
         except Exception as e:
             return f"⚠️ 查询失败：{e}"
 
+    # ── 资讯 <代码> ───────────────────────────────────────────────────────────
+    if cmd in ("资讯", "新闻", "动态"):
+        if len(parts) < 2:
+            return "格式：资讯 <代码>\n例：资讯 688008 / 资讯 NVDA"
+        code = parts[1]
+        wl_item = next((w for w in WATCHLIST if w["code"] == code), {})
+        name    = wl_item.get("name", code)
+        market  = wl_item.get("market", "A")
+        _reply(client, chat_id, f"🔍 正在搜索 {name}（{code}）近期动态，请稍候...")
+        _do_news_search(client, chat_id, name, code, market)
+        return None
+
     # ── 日报 ─────────────────────────────────────────────────────────────────
     if cmd == "日报":
         try:
@@ -334,6 +346,22 @@ def _handle_text(text: str, client, chat_id: str) -> Optional[str]:
 
     # 不是已知指令 → 忽略
     return None
+
+
+# ── 联网搜索工具 ──────────────────────────────────────────────────────────────
+
+def _do_news_search(client, chat_id: str, name: str, code: str, market: str):
+    """执行联网新闻搜索并发送结果卡片到飞书。"""
+    from news_search import search_company_news
+    from feishu_card import build_news_card
+    from push import send_feishu_card
+
+    articles = search_company_news(name, code, market, max_results=6)
+    card = build_news_card(name, code, market, articles)
+    r = send_feishu_card(card, chat_id)
+    if not r.get("sent"):
+        from news_search import build_news_reply
+        _reply(client, chat_id, build_news_reply(name, code, market, articles))
 
 
 # ── WebSocket 事件处理 ────────────────────────────────────────────────────────
@@ -404,27 +432,9 @@ def _make_card_handler(client):
             elif action == "news":
                 code   = action_val.get("code", "")
                 name   = action_val.get("name", code)
-                from push import notify_newsagent
-                msg = (
-                    f"请搜索并回复 {name}（{code}）的以下信息：\n"
-                    f"1. 公司主营业务简介（2-3句话）\n"
-                    f"2. 近期重要公告或财报摘要\n"
-                    f"3. 行业地位和核心竞争优势\n"
-                    f"4. 近期值得关注的新闻或风险\n"
-                    f"请简洁回复，突出关键信息。"
-                )
-                r = notify_newsagent([msg])
-                if r.get("sent"):
-                    _reply(client, chat_id,
-                           f"📰 已向 AI资讯助手 发送 {name} 的信息查询请求，请稍候查看回复")
-                else:
-                    reason = r.get("reason", "未知")
-                    resp   = r.get("resp", "")
-                    print(f"[card_action] newsagent 发送失败: {reason} | API响应: {resp}")
-                    _reply(client, chat_id,
-                           f"⚠️ newsagent 发送失败（{reason}）\n"
-                           f"API 响应: {resp[:200] if resp else '无'}\n"
-                           f"请检查 NEWSAGENT_CHAT_ID 及应用的消息发送权限")
+                market = action_val.get("market", "A")
+                _reply(client, chat_id, f"🔍 正在搜索 {name}（{code}）近期动态，请稍候...")
+                _do_news_search(client, chat_id, name, code, market)
 
         except Exception as e:
             print(f"[card_action] 处理出错: {e}")

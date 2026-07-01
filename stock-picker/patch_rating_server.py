@@ -70,7 +70,7 @@ _STOCK_VENV   = os.path.join(_STOCK_DIR, ".venv", "bin", "python3")
 _STOCK_KEYWORDS = {
     "买入", "卖出", "持仓", "分析", "加股", "减股",
     "关注列表", "关注", "查", "日报", "选股",
-    "资讯", "新闻", "动态", "诊断", "帮助",
+    "资讯", "新闻", "动态", "诊断", "帮助", "录入",
 }
 
 
@@ -78,7 +78,14 @@ def _is_stock_cmd(text: str) -> bool:
     """Return True if text starts with a known stock command keyword."""
     # Skip leading @-mentions so group-chat messages like '@bot 帮助' also match
     words = [w for w in text.split() if not w.startswith("@")]
-    return bool(words) and words[0] in _STOCK_KEYWORDS
+    if not words:
+        return False
+    first = words[0]
+    # Exact match (e.g. "持仓", "帮助")
+    if first in _STOCK_KEYWORDS:
+        return True
+    # Prefix match: handles natural phrasing like "关注美股Circle" or "持仓情况"
+    return any(first.startswith(kw) for kw in _STOCK_KEYWORDS if len(kw) >= 2)
 
 
 def _run_stock_cmd(text: str) -> None:

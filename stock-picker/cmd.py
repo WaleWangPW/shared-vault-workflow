@@ -607,6 +607,7 @@ def _get_src():
 HELP = """📋 股票助手指令
 
   买入 <代码> <成本价> <股数>       买入 688008 260.0 100
+  录入 <代码> <成本价> <股数>       录入 CRCL 109.157 254  （买入别名）
   卖出 <代码>                       卖出 688008
   持仓                              列出所有持仓和盈亏
   分析                              全仓+关注列表综合分析+推荐
@@ -655,6 +656,7 @@ def main():
 
     dispatch = {
         "买入":    lambda: cmd_mairu(rest),
+        "录入":    lambda: cmd_mairu(rest),   # alias for 买入
         "卖出":    lambda: remove_holding(_norm(rest[0])) if rest else "格式：卖出 <代码>",
         "持仓":    lambda: cmd_chicangs(),
         "分析":    lambda: cmd_fenxi(),
@@ -676,6 +678,15 @@ def main():
     }
 
     fn = dispatch.get(cmd)
+    # Prefix match: "录入持仓" → "录入", "持仓情况" → "持仓", "关注美股CRCL" → "关注"
+    if fn is None and len(cmd) >= 2:
+        matched_key = next(
+            (k for k in sorted(dispatch, key=len, reverse=True)
+             if cmd.startswith(k) and len(k) >= 2),
+            None,
+        )
+        if matched_key:
+            fn = dispatch[matched_key]
     if fn:
         print(fn())
     else:

@@ -100,14 +100,16 @@ def _run_stock_cmd(text: str) -> None:
             [py_bin, _STOCK_CMD_PY] + parts,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             cwd=_STOCK_DIR,
         )
         reply = (result.stdout or result.stderr or "❌ 无输出").strip()
     except subprocess.TimeoutExpired:
-        reply = "⏳ 处理超时（>60s），请稍后重试"
+        reply = "⏳ 处理超时（>120s），请稍后重试"
     except Exception as exc:  # noqa: BLE001
         reply = "❌ 股票脚本出错：" + str(exc)
+    if reply == "__CARD_SENT__":
+        return  # cmd.py 已直接发送飞书卡片，无需重复推送
     _send_feishu_text(reply)
 # ── /stock-picker 路由 ────────────────────────────────────────────────────────
 

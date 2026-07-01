@@ -90,6 +90,47 @@ if m2:
 else:
     print("⚠️  未找到 _is_stock_cmd，跳过")
 
+# ── 更新 _run_stock_cmd ───────────────────────────────────────────────────────
+NEW_RUN_STOCK_CMD = '''\
+def _run_stock_cmd(text: str) -> None:
+    """Execute cmd.py with the user's arguments and send the result to Feishu."""
+    parts = text.strip().split()
+    py_bin = _STOCK_VENV if os.path.exists(_STOCK_VENV) else "python3"
+    if not os.path.exists(_STOCK_CMD_PY):
+        _send_feishu_text("❌ 找不到股票脚本: " + _STOCK_CMD_PY)
+        return
+    try:
+        result = subprocess.run(
+            [py_bin, _STOCK_CMD_PY] + parts,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=_STOCK_DIR,
+        )
+        reply = (result.stdout or result.stderr or "❌ 无输出").strip()
+    except subprocess.TimeoutExpired:
+        reply = "⏳ 处理超时（>120s），请稍后重试"
+    except Exception as exc:  # noqa: BLE001
+        reply = "❌ 股票脚本出错：" + str(exc)
+    if reply == "__CARD_SENT__":
+        return  # cmd.py 已直接发送飞书卡片，无需重复推送
+    _send_feishu_text(reply)'''
+
+run_cmd_pattern = re.compile(
+    r'def _run_stock_cmd\(text: str\) -> None:.*?_send_feishu_text\(reply\)',
+    re.DOTALL
+)
+m3 = run_cmd_pattern.search(src)
+if m3:
+    if "__CARD_SENT__" not in m3.group(0):
+        src = src[:m3.start()] + NEW_RUN_STOCK_CMD + src[m3.end():]
+        print("✅ _run_stock_cmd 已更新（卡片哨兵 + 120s 超时）")
+        changed = True
+    else:
+        print("ℹ️  _run_stock_cmd 已是最新")
+else:
+    print("⚠️  未找到 _run_stock_cmd，跳过")
+
 if changed:
     rs_path.write_text(src, encoding="utf-8")
     print(f"✅ 已写回: {rs_path}")

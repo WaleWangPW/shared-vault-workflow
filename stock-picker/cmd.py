@@ -538,9 +538,7 @@ def cmd_xuangu(args):
     while i < len(args):
         a = args[i]
         if a.upper() in MARKETS:
-            market = "A" if a == "全部" else a.upper()
-            if a == "全部":
-                market = "ALL"
+            market = "ALL" if a == "全部" else a.upper()
         elif a in ("-n", "--top") and i + 1 < len(args):
             try:
                 top_n = int(args[i + 1])
@@ -550,7 +548,29 @@ def cmd_xuangu(args):
         elif not a.startswith("-"):
             sector_kw = a
         i += 1
-    return run_market_screen(market=market, sector_kw=sector_kw, top_n=top_n, deep_n=deep_n)
+
+    # ALL 模式合并三市，只输出文本
+    if market == "ALL":
+        return run_market_screen(market=market, sector_kw=sector_kw, top_n=top_n, deep_n=deep_n)
+
+    text, results, n_scanned = run_market_screen(
+        market=market, sector_kw=sector_kw, top_n=top_n, deep_n=deep_n, structured=True
+    )
+    if not results:
+        return text  # 错误或无结果，直接返回文字
+
+    # 尝试发送飞书交互卡片（含「⭐ 加入关注」按钮）
+    try:
+        from feishu_card import build_screen_card
+        from push import send_feishu_card
+        card = build_screen_card(market, results, n_scanned, sector_kw)
+        r = send_feishu_card(card)
+        if r.get("sent"):
+            return "__CARD_SENT__"
+        print(f"[cmd] 卡片推送失败({r.get('reason','')})，降级文本", flush=True)
+    except Exception as e:
+        print(f"[cmd] 卡片构建异常: {e}，降级文本", flush=True)
+    return text
 
 
 # ── 诊断 ───────────────────────────────────────────────────────────────────────
@@ -688,7 +708,11 @@ def main():
         if matched_key:
             fn = dispatch[matched_key]
     if fn:
-        print(fn())
+        result = fn()
+        if result == "__CARD_SENT__":
+            print("✅ 已发送选股卡片到飞书")
+        else:
+            print(result)
     else:
         print(f"未知指令：{cmd}\n\n{HELP}")
 

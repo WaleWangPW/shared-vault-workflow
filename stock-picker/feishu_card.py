@@ -126,11 +126,21 @@ def build_screen_card(market: str, results: List[Dict],
     }
 
 
-def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) -> Dict:
-    """将 run_daily 的选股结果构建为飞书卡片（column_set 真实多列布局）。"""
+def build_daily_card(
+    date: str,
+    candidates: List[Dict],
+    holdings: List[Dict],
+    sentiment: Dict = None,
+    suggestions: List[str] = None,
+) -> Dict:
+    """将 run_daily 的选股结果构建为飞书卡片。
+
+    新版结构：持仓盈亏快照 → 今日操作建议 → 候选选股 → 市场情绪。
+    sentiment: {"n_up": x, "n_down": y, "avg_pct": z, "n_total": n}
+    suggestions: ["【股票】信号描述", ...]
+    """
 
     def _row(cells, weights):
-        """生成一行 column_set，每格为 lark_md。"""
         return {
             "tag": "column_set",
             "flex_mode": "none",
@@ -145,13 +155,44 @@ def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) ->
             ],
         }
 
-    # 候选区
-    C_W = [1, 5, 4, 1]   # 序 | 名称/代码/市场 | 价格组 | 得分
-    elements: List[Dict] = [
-        {"tag": "markdown", "content": f"**🎯 候选（{len(candidates)} 只）**"},
-        _row(["**序**", "**名称（代码）市场**", "**现价 / 买点 / 止损**", "**分**"], C_W),
-        {"tag": "hr"},
-    ]
+    elements: List[Dict] = []
+
+    # ── 持仓盈亏快照 ──────────────────────────────────────────────────────
+    elements.append({"tag": "markdown", "content": "**📈 持仓盈亏快照**"})
+    if holdings:
+        H_W = [4, 2, 2, 2, 3]
+        elements.append(_row(
+            ["**股票**", "**成本**", "**现价**", "**今日**", "**盈亏 / 信号**"],
+            H_W,
+        ))
+        elements.append({"tag": "hr"})
+        for h in holdings:
+            cost    = str(h["cost"])  if h.get("cost")  else "-"
+            price   = str(h["price"]) if h.get("price") else "-"
+            pnl     = h.get("pnl_pct") or "-"
+            today_p = h.get("today_pct")
+            signal  = h.get("signal") or ""
+            today_s = f"{today_p:+.2f}%" if today_p is not None else "-"
+            pnl_signal = pnl + (f"\n{signal}" if signal else "")
+            elements.append(_row(
+                [f"**{h['name']}**\n{h['code']}", cost, price, today_s, pnl_signal],
+                H_W,
+            ))
+    else:
+        elements.append({"tag": "markdown", "content": "当前无持仓"})
+    elements.append({"tag": "hr"})
+
+    # ── 今日操作建议 ──────────────────────────────────────────────────────
+    if suggestions:
+        sug_content = "**⚡ 今日操作建议**\n\n" + "\n".join(f"▸ {s}" for s in suggestions)
+        elements.append({"tag": "markdown", "content": sug_content})
+        elements.append({"tag": "hr"})
+
+    # ── 候选选股 ──────────────────────────────────────────────────────────
+    C_W = [1, 5, 4, 1]
+    elements.append({"tag": "markdown", "content": f"**🎯 候选选股（{len(candidates)} 只）**"})
+    elements.append(_row(["**序**", "**名称（代码）市场**", "**现价 / 买点 / 止损**", "**分**"], C_W))
+    elements.append({"tag": "hr"})
 
     for i, c in enumerate(candidates, 1):
         bp  = c.get("buy") or {}
@@ -161,48 +202,48 @@ def build_daily_card(date: str, candidates: List[Dict], holdings: List[Dict]) ->
         if isinstance(cur, float): cur = f"{cur:.2f}"
         if isinstance(bpt, float): bpt = f"{bpt:.2f}"
         if isinstance(stp, float): stp = f"{stp:.2f}"
-        flag = "✅" if c.get("basic_pass") else "⬜"
+        flag  = "✅" if c.get("basic_pass") else "⬜"
         score = c.get("score", 0)
+        pe_s  = f"  PE {c['pe_ttm']:.0f}x" if c.get("pe_ttm") else ""
+        pct_s = f"  {c['today_pct']:+.1f}%" if c.get("today_pct") is not None else ""
         elements.append(_row([
             str(i),
-            f"{flag} **{c['name']}**\n{c['code']}  [{c.get('market', '-')}]",
-            f"现价 **{cur}**\n买点 {bpt}  止损 {stp}",
+            f"{flag} **{c['name']}**\n{c['code']}  [{c.get('market', '-')}]{pe_s}",
+            f"现价 **{cur}**{pct_s}\n买点 {bpt}  止损 {stp}",
             f"**{score:+d}**",
         ], C_W))
 
+    # 触发信号
     elements.append({"tag": "hr"})
-
-    # 触发信号（过滤 lite 内部标记，只显示实质性信号）
     _SKIP = {"lite:仅技术面"}
     sig_lines = []
     for c in candidates:
         hits = [h for h in (c.get("hits") or []) if h not in _SKIP]
         if hits:
             sig_lines.append(f"**{c['name']}**：" + " · ".join(hits))
-    elements.append({
-        "tag": "markdown",
-        "content": "**✦ 触发信号**\n\n" + ("\n".join(sig_lines) if sig_lines else "暂无实质信号"),
-    })
-    elements.append({"tag": "hr"})
-
-    # 持仓区
-    elements.append({"tag": "markdown", "content": f"**📈 持仓跟踪（{len(holdings)} 只）**"})
-    if holdings:
-        H_W = [4, 2, 2, 2]
-        elements.append(_row(["**名称（代码）**", "**成本**", "**现价**", "**盈亏**"], H_W))
+    if sig_lines:
+        elements.append({
+            "tag": "markdown",
+            "content": "**✦ 触发信号**\n\n" + "\n".join(sig_lines),
+        })
         elements.append({"tag": "hr"})
-        for h in holdings:
-            cost  = str(h["cost"])  if h.get("cost")  else "-"
-            price = str(h["price"]) if h.get("price") else "-"
-            pnl   = h.get("pnl_pct") or "-"
-            elements.append(_row(
-                [f"**{h['name']}**\n{h['code']}", cost, price, pnl],
-                H_W,
-            ))
-    else:
-        elements.append({"tag": "markdown", "content": "当前无持仓"})
 
-    elements.append({"tag": "hr"})
+    # ── 市场情绪 ──────────────────────────────────────────────────────────
+    if sentiment and sentiment.get("n_total", 0) > 0:
+        n_up   = sentiment.get("n_up", 0)
+        n_down = sentiment.get("n_down", 0)
+        n_tot  = sentiment.get("n_total", 0)
+        avg_p  = sentiment.get("avg_pct")
+        avg_s  = f"{avg_p:+.2f}%" if avg_p is not None else "N/A"
+        bull_pct = n_up / n_tot * 100 if n_tot else 0
+        mood = "偏多 📈" if bull_pct >= 60 else ("偏空 📉" if bull_pct <= 40 else "中性 ⟷")
+        elements.append({"tag": "markdown", "content": (
+            f"**🌡 市场情绪（关注股 {n_tot} 只）**\n\n"
+            f"涨 **{n_up}**只  跌 **{n_down}**只  平均 {avg_s}  "
+            f"多空比 {bull_pct:.0f}%  → {mood}"
+        )})
+        elements.append({"tag": "hr"})
+
     elements.append({
         "tag": "note",
         "elements": [{"tag": "plain_text", "content": "⚠️ 仅供研究学习，不构成投资建议"}],

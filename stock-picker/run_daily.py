@@ -109,6 +109,8 @@ def run(dry_run: bool = False):
             "score": sc["score"], "hits": sc["hits"],
             "basic_pass": basic["pass"], "skipped": basic["skipped"],
             "buy": bp,
+            "today_pct": q.pct_change if q else None,
+            "pe_ttm":    q.pe_ttm    if q else None,
         })
 
         # 控制台简报
@@ -122,22 +124,62 @@ def run(dry_run: bool = False):
     for hcode, pos in holdings.items():
         cost = pos.get("cost")
         wl_item = next((w for w in watchlist if w["code"] == hcode), {})
-        hmarket = wl_item.get("market", "A")
-        hname   = wl_item.get("name", hcode)
-        hprice  = None
-        pnl_pct = None
+        hmarket   = wl_item.get("market", "A")
+        hname     = wl_item.get("name", hcode)
+        hprice    = None
+        pnl_pct   = None
+        today_pct = None
+        signal    = None
+        buy_point = stop_loss = None
         try:
             hq = src.get_quote(hcode, hmarket)
             if hq and hq.price:
-                hprice = round(hq.price, 3)
+                hprice    = round(hq.price, 3)
+                today_pct = hq.pct_change
                 if cost:
                     pnl_pct = f"{(hq.price - cost) / cost * 100:+.1f}%"
+            hprices = src.get_daily(hcode, hmarket, 130)
+            if hprices:
+                hbp = calculate_buy_point(hprices)
+                if not hbp.get("error") and hprice:
+                    buy_point = hbp.get("buy_point")
+                    stop_loss = hbp.get("stop_loss")
+                    target_p  = hbp.get("target_price")
+                    sigs = []
+                    if buy_point and abs(hprice - buy_point) / buy_point <= 0.03:
+                        sigs.append("📍近买点")
+                    if stop_loss and hprice <= stop_loss:
+                        sigs.append("🔴破止损")
+                    elif stop_loss and (hprice - stop_loss) / stop_loss < 0.08:
+                        sigs.append(f"⚠️距止损{(hprice-stop_loss)/stop_loss*100:.1f}%")
+                    if target_p and hprice >= target_p * 0.95:
+                        sigs.append("🎯近目标")
+                    if sigs:
+                        signal = " | ".join(sigs)
         except Exception:
             pass
         holdings_view.append({
             "code": hcode, "name": hname,
             "cost": cost, "price": hprice, "pnl_pct": pnl_pct,
+            "today_pct": today_pct, "signal": signal,
+            "buy_point": buy_point, "stop_loss": stop_loss,
         })
+
+    # 市场情绪：关注股涨跌分布
+    all_pcts = [c["today_pct"] for c in candidates if c.get("today_pct") is not None]
+    n_up   = sum(1 for p in all_pcts if p > 0)
+    n_down = sum(1 for p in all_pcts if p < 0)
+    sentiment = {
+        "n_up": n_up, "n_down": n_down,
+        "avg_pct": sum(all_pcts) / len(all_pcts) if all_pcts else None,
+        "n_total": len(all_pcts),
+    }
+
+    # 今日操作建议：从持仓信号提炼
+    suggestions = []
+    for h in holdings_view:
+        if h.get("signal"):
+            suggestions.append(f"【{h['name']}（{h['code']}）】{h['signal']}")
 
     text = build_daily_text(today, top, holdings_view)
     print("\n" + text + "\n")
@@ -145,7 +187,7 @@ def run(dry_run: bool = False):
     if dry_run:
         print("[run_daily] --dry-run，未推送")
     else:
-        card = build_daily_card(today, top, holdings_view)
+        card = build_daily_card(today, top, holdings_view, sentiment=sentiment, suggestions=suggestions)
         r = send_feishu_card(card)
         if r.get("sent"):
             print("[run_daily] 卡片推送成功")

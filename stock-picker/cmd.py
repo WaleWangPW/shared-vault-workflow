@@ -101,35 +101,81 @@ def cmd_chicangs():
     if not holdings:
         return "📭 当前无持仓记录"
 
+    from buy_point import calculate_buy_point
     src = _get_src()
     wl  = effective_watchlist(WATCHLIST)
-    lines = [f"📈 持仓列表（{dt.date.today()}）\n"]
+    today = dt.date.today().strftime("%Y-%m-%d")
+    lines = [f"📈 持仓快照  {today}", ""]
     total_cost = total_val = 0.0
 
     for code, pos in holdings.items():
-        name  = pos.get("name", code)
-        cost  = pos.get("cost") or 0.0
-        shs   = pos.get("shares") or 0
-        price_str = pnl_str = "N/A"
+        name   = pos.get("name", code)
+        cost   = pos.get("cost") or 0.0
+        shs    = pos.get("shares") or 0
+        market = next((w["market"] for w in wl if w["code"] == code), "A")
+
+        cur = None
+        bp = None
+        pct_today = None
         try:
             if src:
-                market = next((w["market"] for w in wl if w["code"] == code), "A")
+                prices = src.get_daily(code, market, 130)
                 q = src.get_quote(code, market)
                 if q and q.price:
                     cur = q.price
-                    price_str = f"¥{cur:.3f}"
-                    if cost:
-                        pnl = (cur - cost) / cost * 100
-                        pnl_str = f"{pnl:+.1f}%"
+                    pct_today = q.pct_change
+                    if cost and cur:
                         total_cost += cost * shs
                         total_val  += cur * shs
+                if prices:
+                    bp = calculate_buy_point(prices)
         except Exception:
             pass
-        lines.append(f"  {name}({code})\n  成本¥{cost}  现价{price_str}  {shs}股  盈亏{pnl_str}")
 
+        price_str = f"¥{cur:.3f}" if cur else "N/A"
+        pnl_str   = f"{(cur-cost)/cost*100:+.1f}%" if cur and cost else "N/A"
+        pct_str   = f"今日 {pct_today:+.2f}%" if pct_today is not None else ""
+        val_str   = f"市值 ¥{cur*shs:,.0f}" if cur else ""
+
+        lines.append(f"▸ {name}（{code} · {market}）")
+        lines.append(f"  {shs}股  成本 ¥{cost}  现价 {price_str}  {pct_str}")
+        lines.append(f"  盈亏 {pnl_str}  {val_str}")
+
+        if bp and not bp.get("error") and cur:
+            buy_pt = bp.get("buy_point")
+            stop   = bp.get("stop_loss")
+            target = bp.get("target_price")
+            trend  = bp.get("trend_up")
+            trend_s = "↑" if trend else ("↓" if trend is False else "—")
+
+            signals = []
+            if buy_pt and abs(cur - buy_pt) / buy_pt <= 0.03:
+                signals.append("📍近买点")
+            if stop and cur <= stop:
+                signals.append("🔴破止损")
+            elif stop and (cur - stop) / stop < 0.08:
+                signals.append(f"⚠️距止损{(cur-stop)/stop*100:.1f}%")
+            if target and cur >= target * 0.95:
+                signals.append("🎯近目标")
+
+            ref_parts = []
+            if buy_pt: ref_parts.append(f"买¥{buy_pt:.2f}")
+            if stop:   ref_parts.append(f"止¥{stop:.2f}")
+
+            sig_line = f"  趋势{trend_s}"
+            if ref_parts:
+                sig_line += "  " + " | ".join(ref_parts)
+            if signals:
+                sig_line += "  " + " | ".join(signals)
+            lines.append(sig_line)
+        lines.append("")
+
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     if total_cost > 0:
-        lines.append(f"\n汇总盈亏：{(total_val-total_cost)/total_cost*100:+.1f}%")
-    lines.append("\n⚠️ 仅供研究，非投资建议")
+        total_pnl = (total_val - total_cost) / total_cost * 100
+        lines.append(f"汇总  总成本 ¥{total_cost:,.0f}  总市值 ¥{total_val:,.0f}")
+        lines.append(f"      总盈亏 {total_pnl:+.1f}%")
+    lines.append("⚠️ 仅供研究，非投资建议")
     return "\n".join(lines)
 
 
@@ -337,6 +383,7 @@ def cmd_cha(args):
     item = next((w for w in wl if w["code"] == code), {})
     market = item.get("market", "A")
     name   = item.get("name", code)
+    note   = item.get("note", "")
     src    = _get_src()
     try:
         prices = src.get_daily(code, market, 130)
@@ -344,17 +391,107 @@ def cmd_cha(args):
         if not prices or q is None:
             return f"⚠️ {code} 无行情数据"
         bp = calculate_buy_point(prices)
-        pct_s = f"  今日{q.pct_change:+.2f}%" if q.pct_change else ""
-        lines = [
-            f"📊 {name}({code}/{market})  {dt.date.today()}",
-            f"  现价：¥{q.price:.3f}{pct_s}",
-            f"  买点：¥{bp.get('buy_point', 'N/A')}",
-            f"  止损：¥{bp.get('stop_loss', 'N/A')}",
-            f"  目标：{'¥'+str(bp.get('target_price')) if bp.get('target_price') else 'N/A'}",
-            f"  MA20：¥{bp.get('ma20', 'N/A')}",
-            f"  趋势：{'↑ 上升' if bp.get('trend_up') else '↓ 下降' if bp.get('trend_up') is False else 'N/A'}",
-            "\n⚠️ 仅供研究，非投资建议",
-        ]
+
+        f_data = None
+        if market == "A":
+            try:
+                f_data = src.get_financials(code, market)
+            except Exception:
+                pass
+
+        today = dt.date.today().strftime("%Y-%m-%d")
+        pct_s = f"{q.pct_change:+.2f}%" if q.pct_change is not None else "N/A"
+        lines = [f"📊 {name}（{code} · {market}）  {today}"]
+
+        # 行情
+        lines.append("━━ 行情 ━━━━━━━━━━━━━━━━━━━━━━━")
+        quot_line = f"  现价 ¥{q.price:.3f}  今日 {pct_s}"
+        if q.pe_ttm:
+            quot_line += f"  PE {q.pe_ttm:.1f}x"
+        lines.append(quot_line)
+        if q.market_cap and q.market_cap > 0:
+            lines.append(f"  总市值 {q.market_cap/1e8:.0f}亿元")
+
+        # 技术面
+        lines.append("━━ 技术面 ━━━━━━━━━━━━━━━━━━━━━")
+        if not bp.get("error"):
+            ma20    = bp.get("ma20")
+            trend   = bp.get("trend_up")
+            buy_pt  = bp.get("buy_point")
+            stop    = bp.get("stop_loss")
+            target  = bp.get("target_price")
+            rr      = bp.get("risk_reward")
+            trend_s = "↑上升" if trend else ("↓下降" if trend is False else "横盘")
+            if ma20:
+                lines.append(f"  MA20 ¥{ma20:.3f}  趋势 {trend_s}")
+            pts = []
+            if buy_pt: pts.append(f"买点 ¥{buy_pt:.2f}")
+            if stop:   pts.append(f"止损 ¥{stop:.2f}")
+            if target: pts.append(f"目标 ¥{target:.2f}")
+            if pts:
+                lines.append(f"  {' | '.join(pts)}")
+            if rr:
+                lines.append(f"  风险收益比 1:{rr:.1f}")
+
+            signals = []
+            if buy_pt and q.price:
+                diff = (q.price - buy_pt) / buy_pt
+                if abs(diff) <= 0.03:
+                    signals.append("📍接近买点")
+                elif diff < -0.05:
+                    signals.append(f"⬇ 低于买点 {abs(diff)*100:.0f}%")
+                elif diff > 0.10:
+                    signals.append(f"⬆ 高于买点 {diff*100:.0f}%，暂不追")
+            if stop and q.price:
+                if q.price <= stop:
+                    signals.append("🔴已跌破止损")
+                elif (q.price - stop) / stop < 0.08:
+                    signals.append(f"⚠️ 距止损仅 {(q.price-stop)/stop*100:.1f}%")
+            if target and q.price and q.price >= target * 0.95:
+                signals.append("🎯 接近目标价，考虑止盈")
+            if signals:
+                lines.append(f"  信号: {'  '.join(signals)}")
+        else:
+            lines.append(f"  {bp.get('error', '数据不足')}")
+
+        # 基本面（A股）
+        if f_data and any([
+            f_data.revenue_growth_yoy is not None,
+            f_data.profit_growth_yoy is not None,
+            bool(f_data.gross_margin_series),
+            bool(f_data.roe_series),
+        ]):
+            lines.append("━━ 基本面 ━━━━━━━━━━━━━━━━━━━━━")
+            growth_parts = []
+            if f_data.revenue_growth_yoy is not None:
+                growth_parts.append(f"营收增速 {f_data.revenue_growth_yoy*100:+.0f}%")
+            if f_data.profit_growth_yoy is not None:
+                growth_parts.append(f"利润增速 {f_data.profit_growth_yoy*100:+.0f}%")
+            if growth_parts:
+                lines.append(f"  {' | '.join(growth_parts)}")
+            qual_parts = []
+            if f_data.gross_margin_series:
+                gm = f_data.gross_margin_series[-1] * 100
+                gm_trend = ""
+                if len(f_data.gross_margin_series) >= 2:
+                    gm_trend = "↑" if f_data.gross_margin_series[-1] > f_data.gross_margin_series[-2] else "↓"
+                qual_parts.append(f"毛利率 {gm:.1f}%{gm_trend}")
+            if f_data.roe_series:
+                qual_parts.append(f"ROE {f_data.roe_series[-1]*100:.1f}%")
+            if f_data.core_profit_ratio is not None:
+                qual_parts.append(f"扣非比 {f_data.core_profit_ratio*100:.0f}%")
+            if qual_parts:
+                lines.append(f"  {' | '.join(qual_parts)}")
+            if f_data.operating_cashflow is not None:
+                cf_b = f_data.operating_cashflow / 1e8
+                lines.append(f"  经营现金流 {'✅' if cf_b > 0 else '⚠️'} {cf_b:+.1f}亿")
+
+        # 关注理由
+        if note:
+            lines.append("━━ 关注理由 ━━━━━━━━━━━━━━━━━━━━")
+            lines.append(f"  {note}")
+
+        lines.append("\n⚠️ 仅供研究，非投资建议")
         return "\n".join(lines)
     except Exception as e:
         return f"⚠️ 查询失败：{e}"

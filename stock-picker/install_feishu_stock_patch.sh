@@ -12,20 +12,23 @@ STOCK_DIR="$(cd "$(dirname "$0")" && pwd)"
 RS_PATH="$HOME/.openclaw/agents/ai-news-agent/workspace/scripts/rating-server.py"
 
 _restart_openclaw() {
-    local OC_PLIST
-    OC_PLIST=$(ls "$HOME/Library/LaunchAgents/"*openclaw*.plist 2>/dev/null | head -1 || true)
-    if [ -n "$OC_PLIST" ]; then
-        launchctl unload "$OC_PLIST" 2>/dev/null || true
-        sleep 1
-        launchctl load -w "$OC_PLIST" 2>/dev/null || true
-        echo "✅ openclaw 已通过 launchctl 重启"
-    elif command -v pm2 &>/dev/null && pm2 list 2>/dev/null | grep -q "openclaw"; then
-        pm2 restart openclaw 2>/dev/null || true
-        echo "✅ openclaw 已通过 pm2 重启"
+    local RS_LABEL="ai.openclaw.rating-server"
+    local RS_PLIST="$HOME/Library/LaunchAgents/${RS_LABEL}.plist"
+
+    if launchctl list "$RS_LABEL" &>/dev/null; then
+        # LaunchAgent exists — kickstart (kill + relaunch)
+        launchctl kickstart -k "gui/$(id -u)/${RS_LABEL}" 2>/dev/null || true
+        echo "✅ rating-server 已通过 launchctl kickstart 重启"
+    elif [ -f "$RS_PLIST" ]; then
+        launchctl load -w "$RS_PLIST" 2>/dev/null || true
+        echo "✅ rating-server LaunchAgent 已加载"
     else
-        echo "ℹ️  请手动重启 openclaw ai-news-agent："
-        echo "   launchctl unload ~/Library/LaunchAgents/*openclaw*.plist"
-        echo "   launchctl load   ~/Library/LaunchAgents/*openclaw*.plist"
+        echo "ℹ️  未找到 LaunchAgent，直接在后台启动 rating-server..."
+        local LOG="$HOME/.openclaw/agents/ai-news-agent/workspace/logs/rating-server.log"
+        nohup python3 \
+            "$HOME/.openclaw/agents/ai-news-agent/workspace/scripts/rating-server.py" \
+            >> "$LOG" 2>&1 &
+        echo "✅ rating-server 已后台启动 (PID=$!)"
     fi
 }
 

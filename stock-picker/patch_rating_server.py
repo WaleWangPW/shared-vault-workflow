@@ -76,8 +76,9 @@ _STOCK_KEYWORDS = {
 
 def _is_stock_cmd(text: str) -> bool:
     """Return True if text starts with a known stock command keyword."""
-    first_word = text.split()[0] if text.strip() else ""
-    return first_word in _STOCK_KEYWORDS
+    # Skip leading @-mentions so group-chat messages like '@bot 帮助' also match
+    words = [w for w in text.split() if not w.startswith("@")]
+    return bool(words) and words[0] in _STOCK_KEYWORDS
 
 
 def _run_stock_cmd(text: str) -> None:
@@ -85,10 +86,7 @@ def _run_stock_cmd(text: str) -> None:
     parts = text.strip().split()
     py_bin = _STOCK_VENV if os.path.exists(_STOCK_VENV) else "python3"
     if not os.path.exists(_STOCK_CMD_PY):
-        _send_feishu_text(
-            f"❌ 找不到股票脚本 {_STOCK_CMD_PY}\\n"
-            "请确认 shared-vault-workflow 已克隆到 ~/shared-vault-workflow"
-        )
+        _send_feishu_text("❌ 找不到股票脚本: " + _STOCK_CMD_PY)
         return
     try:
         result = subprocess.run(
@@ -102,7 +100,7 @@ def _run_stock_cmd(text: str) -> None:
     except subprocess.TimeoutExpired:
         reply = "⏳ 处理超时（>60s），请稍后重试"
     except Exception as exc:  # noqa: BLE001
-        reply = f"❌ 股票脚本出错：{exc}"
+        reply = "❌ 股票脚本出错：" + str(exc)
     _send_feishu_text(reply)
 # ── /stock-picker 路由 ────────────────────────────────────────────────────────
 
